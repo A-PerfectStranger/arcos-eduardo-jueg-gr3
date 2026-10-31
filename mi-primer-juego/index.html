@@ -6,22 +6,25 @@
       name="viewport"
       content="width=device-width,initial-scale=1,viewport-fit=cover"
     />
-    <meta name="theme-color" content="#172c35" />
-    <meta name="description" content="CIMA: juego de salto de precisión." />
-    <title>CIMA</title>
-    <link rel="icon" href="./assets/crown.svg" type="image/svg+xml" />
+    <meta name="theme-color" content="#121d34" />
+    <meta
+      name="description"
+      content="Hasta la Luna: una aventura espacial de saltos de precisión. Entrena y recorre una campaña procedural."
+    />
+    <title>Hasta la Luna · CIMA</title>
+    <link rel="icon" href="./assets/moon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main class="play-area" aria-label="Juego CIMA">
+    <main class="play-area" aria-label="Hasta la Luna">
       <div id="stage">
         <div
           id="game"
           role="img"
-          aria-label="Juego de salto de precisión CIMA"
+          aria-label="Astronauta ascendiendo hacia la Luna"
         ></div>
         <div class="game-toolbar">
-          <span id="zone-title">01 · PRADERA</span>
+          <span id="zone-title">T · PRADERA</span>
           <div>
             <button id="sound" aria-label="Activar sonido" aria-pressed="false">
               Sonido OFF
@@ -30,9 +33,14 @@
             <button id="fullscreen" aria-label="Pantalla completa">⛶</button>
           </div>
         </div>
+        <div id="mission-status">ENTRENAMIENTO · 25 SALTOS</div>
+        <div class="progress" aria-hidden="true">
+          <i id="progress-fill"></i>
+        </div>
         <div class="ingame-label">
           <span id="altitude">000</span><small>METROS</small>
         </div>
+        <p id="help">← → / A D · Mantén ESPACIO y suelta</p>
         <div class="bottom-hud">
           <div class="charge-indicator">
             <span>POTENCIA</span>
@@ -69,11 +77,32 @@
             aria-modal="true"
             aria-labelledby="modal-title"
           >
-            <img class="modal-crown" src="./assets/crown.svg" alt="" />
-            <h1 id="modal-title">CIMA</h1>
-            <p id="modal-copy" hidden></p>
-            <button id="primary" class="primary">Jugar</button>
+            <div class="mission-art" aria-hidden="true">
+              <img src="./assets/astronaut-concepts.png" alt="" />
+            </div>
+            <span class="eyebrow">UNA PROMESA ENTRE ESTRELLAS</span>
+            <h1 id="modal-title">Hasta la Luna</h1>
+            <p id="modal-copy">Ella te espera al otro lado de las estrellas.</p>
+            <div id="mission-options">
+              <label for="seed"
+                >SEMILLA DE EXPEDICIÓN <span>opcional</span></label
+              ><input
+                id="seed"
+                maxlength="40"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Una nueva historia al azar"
+              />
+              <p id="unlock-note"></p>
+            </div>
+            <button id="primary" class="primary">Entrenar</button>
             <button id="secondary" class="secondary" hidden></button>
+            <button id="training-choice" class="secondary" hidden>
+              Repetir entrenamiento
+            </button>
+            <button id="menu-choice" class="secondary" hidden>
+              Menú principal
+            </button>
           </div>
         </div>
         <div id="toast" role="status" aria-live="polite"></div>

@@ -13,7 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(os.environ.get('CIMA_TEST_OUTPUT', 'work/production-results'))
 OUT.mkdir(parents=True, exist_ok=True)
 files = ['index.html', 'style.css', 'src/loader.js', 'src/game.js',
-         'src/model.js', 'assets/vendor/phaser.min.js', 'assets/crown.svg']
+         'src/model.js', 'src/sprites.js', 'assets/vendor/phaser.min.js',
+         'assets/moon.svg', 'assets/astronaut-concepts.png']
 results = []
 for name in files:
     expected = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()

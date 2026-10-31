@@ -358,3 +358,291 @@ h1 {
     transition: none !important;
   }
 }
+/* Mission interface. Gameplay retains the full viewport on desktop and touch. */
+:root {
+  background: #101a30;
+  color: #f5eadd;
+  font-family: "Trebuchet MS", Arial, sans-serif;
+}
+#mission-status {
+  position: absolute;
+  top: 60px;
+  left: 20px;
+  font: 9px monospace;
+  letter-spacing: 1.5px;
+  color: #b0c5d6;
+  pointer-events: none;
+}
+.ingame-label {
+  top: 91px;
+  color: #e7d9ca !important;
+  text-shadow: none;
+}
+.game-toolbar button {
+  background: #101b30d9;
+  border-color: #a9bfce40;
+  border-radius: 6px;
+}
+.progress {
+  position: absolute;
+  right: 24px;
+  top: 27%;
+  height: 38%;
+  width: 3px;
+  background: #a6bfd52b;
+  pointer-events: none;
+}
+.progress i {
+  position: absolute;
+  bottom: 0;
+  width: 3px;
+  background: #d5acac;
+  box-shadow: 0 0 12px #eeb6ba55;
+}
+#help {
+  position: absolute;
+  bottom: 62px;
+  left: 20px;
+  margin: 0;
+  font: 10px monospace;
+  letter-spacing: 0.2px;
+  color: #b9cdd7;
+  pointer-events: none;
+  max-width: 80%;
+  text-shadow: 0 1px 4px #091125;
+}
+.bottom-hud {
+  color: #e0e5e7;
+}
+.charge-indicator i {
+  background: #a9d7ce;
+}
+.stats span {
+  color: #b3c6d1;
+}
+.stats strong {
+  font-size: 19px;
+}
+.overlay {
+  background: #080f2196;
+  backdrop-filter: blur(3px);
+  overflow-y: auto;
+}
+.modal {
+  width: min(440px, 100%);
+  padding: 28px 36px 26px;
+  border: 1px solid #a9c8d12b;
+  border-radius: 16px;
+  background: linear-gradient(155deg, #23334aed, #111d34f5);
+  box-shadow: 0 28px 100px #03091488;
+}
+.mission-art {
+  height: 104px;
+  width: 108px;
+  overflow: hidden;
+  margin: 0 auto 16px;
+  filter: drop-shadow(0 0 16px #d8a4b322);
+}
+.mission-art img {
+  width: 400px;
+  max-width: none;
+  height: 400px;
+  transform: translate(-283px, -240px);
+  image-rendering: pixelated;
+}
+.eyebrow {
+  display: block;
+  font: 8px monospace;
+  letter-spacing: 2px;
+  color: #d4acae;
+}
+h1 {
+  font-family: Georgia, serif;
+  font-size: 42px;
+  font-weight: normal;
+  letter-spacing: -1.8px;
+  margin: 12px 0 22px;
+  line-height: 1.06;
+}
+#modal-copy {
+  color: #c2cdd6;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+.primary {
+  background: #eac8a7;
+  color: #1d2b40;
+  border-radius: 7px;
+  padding: 15px;
+  letter-spacing: 0.3px;
+}
+.primary:hover {
+  background: #f8dbc1;
+}
+.secondary {
+  margin: 14px 10px 0;
+  color: #bfd7df;
+  line-height: 1.4;
+}
+#mission-options {
+  margin: 0 0 20px;
+  text-align: left;
+}
+#mission-options label {
+  display: block;
+  font: 8px monospace;
+  letter-spacing: 1px;
+  color: #b0c4d2;
+  margin: 0 0 8px;
+}
+#mission-options label span {
+  float: right;
+  letter-spacing: 0;
+  color: #899aae;
+}
+#seed {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #91b7cb45;
+  border-radius: 6px;
+  background: #0a14274d;
+  color: #f3ddc8;
+  padding: 11px;
+  font: 12px monospace;
+}
+#seed:disabled {
+  opacity: 0.4;
+}
+#seed:focus-visible {
+  outline: 2px solid #e8c47b;
+  outline-offset: 2px;
+}
+#unlock-note {
+  font-size: 10px;
+  line-height: 1.5;
+  color: #91a9bc;
+  text-align: center;
+  margin-bottom: 0;
+}
+#toast {
+  background: #132039f0;
+  border: 1px solid #97c6cb33;
+  top: 80px;
+  max-width: min(470px, 75%);
+  line-height: 1.5;
+  color: #f2dbc9;
+  z-index: 4;
+}
+.touch-controls button {
+  background: #16243edb;
+  border-color: #b8d3df50;
+}
+.touch-controls .touch-jump {
+  background: #756078d9;
+}
+.touch-controls button.held {
+  background: #a989a0;
+}
+@media (pointer: coarse), (max-width: 950px) {
+  #help {
+    bottom: 156px;
+  }
+}
+@media (max-width: 600px) {
+  #mission-status {
+    left: 14px;
+    top: 61px;
+    font-size: 8px;
+    letter-spacing: 0.5px;
+  }
+  .ingame-label {
+    top: 85px;
+  }
+  .progress {
+    right: 14px;
+    width: 2px;
+  }
+  .modal {
+    padding: 24px;
+  }
+  h1 {
+    font-size: 38px;
+  }
+  #help {
+    left: 14px;
+    bottom: 175px;
+    font-size: 9px;
+    max-width: 76%;
+  }
+  #toast {
+    top: 136px;
+    font-size: 11px;
+    max-width: 88%;
+  }
+}
+@media (max-height: 600px) {
+  .mission-art {
+    display: none;
+  }
+  .modal {
+    padding: 18px 26px;
+  }
+  h1 {
+    font-size: 30px;
+    margin: 10px 0 18px;
+  }
+  #modal-copy {
+    margin-bottom: 14px;
+  }
+  #mission-options {
+    margin-bottom: 12px;
+  }
+}
+@media (max-height: 450px) {
+  .overlay {
+    padding: 12px;
+  }
+  .modal {
+    width: min(520px, 100%);
+    padding: 16px 24px;
+  }
+  .eyebrow {
+    font-size: 7px;
+  }
+  #modal-copy {
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  h1 {
+    font-size: 28px;
+    margin: 8px 0 14px;
+  }
+  #mission-options {
+    margin-bottom: 10px;
+  }
+  #seed {
+    padding: 7px;
+  }
+  #unlock-note {
+    margin-top: 5px;
+  }
+  .primary {
+    padding: 10px;
+  }
+  .secondary {
+    margin-top: 10px;
+  }
+  #help {
+    bottom: 82px;
+    left: 170px;
+    font-size: 8px;
+    max-width: 50%;
+  }
+  #mission-status {
+    top: 53px;
+  }
+  .ingame-label {
+    top: 76px;
+  }
+}

@@ -1,94 +1,94 @@
-"""Real Chromium + Phaser Arcade integration tests.
-Start `python3 -m http.server 8080` at repository root first.
-Requires Python playwright and Chromium. CIMA_URL can target a deployed build.
-Only ?qa=1 exposes the scene. The 25-jump route never changes player coordinates.
+"""Real Chromium integration: keyboard routes, continuous falls, touch, save/resume.
+Start a server at repository root. Only ?qa=1 exposes the simulation to tests.
+Routes use input events and the live simulation; only isolated fixtures reposition.
 """
 import json, os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-
-BASE = os.environ.get('CIMA_URL', 'http://127.0.0.1:8080/mi-primer-juego/')
-OUT = Path(os.environ.get('CIMA_TEST_OUTPUT', '/workspace/work/cima-tests'))
-OUT.mkdir(parents=True, exist_ok=True)
-HARNESS = '''() => {
- const {game,scene:s,PLATFORMS}=__CIMA__;game.loop.stop();let clock=performance.now();
- const step=(n=1)=>{for(let i=0;i<n;i++){clock+=1000/60;game.headlessStep(clock,1000/60);}};
+BASE=os.environ.get('CIMA_URL','http://127.0.0.1:8080/mi-primer-juego/')
+OUT=Path(os.environ.get('CIMA_TEST_OUTPUT','work/test-results'));OUT.mkdir(parents=True,exist_ok=True)
+HARNESS='''() => {
+ const {game,scene:s}=__CIMA__;game.loop.stop();let clock=performance.now();
  const key=(code,down)=>window.dispatchEvent(new KeyboardEvent(down?'keydown':'keyup',{code,bubbles:true,cancelable:true}));
- const reset=()=>{document.activeElement?.blur();s.startRun();step(5);};
+ const tick=(n=1)=>{for(let i=0;i<n;i++){s.tick();s.drawPlayer();s.followCamera(1/120);if(s.state==='playing'){const cy=s.pilot.y-s.cameras.main.scrollY;if(cy<0||cy>s.scale.gameSize.height)throw Error('Camera lost astronaut during flight');}}s.renderUI();};
+ const reset=()=>{document.activeElement?.blur();s.startRun('training');tick(3);};
  const jumpTo=(i)=>{
- const target=PLATFORMS[i],dir=Math.sign(target.x-s.player.x),launch=target.x-dir*208;
- const walkDir=Math.sign(launch-s.player.x),walkKey=walkDir>0?'ArrowRight':'ArrowLeft';key(walkKey,true);
- let n=0;while(Math.abs(launch-s.player.x)>2.6&&n++<150)step();key(walkKey,false);step();
- if(n>=150)throw Error('Cannot reach takeoff '+i);
- const jumpKey=dir>0?'ArrowRight':'ArrowLeft';key(jumpKey,true);key('Space',true);step(49);key('Space',false);step(2);
- let flight=0;while(!(s.player.body.blocked.down&&s.lastPlatform===i)&&s.state==='playing'&&flight++<140)step();key(jumpKey,false);step();
- if(s.lastPlatform!==i)throw Error('Missed platform '+i+' at '+s.player.x+','+s.player.y);
- return {platform:i,x:s.player.x,y:s.player.y,jumps:s.jumps,zone:s.zone};
+  const p=s.level.platforms[i],dir=Math.sign(p.x-s.pilot.x),launch=p.x-dir*208;
+  let n=0;const walkKey=launch>s.pilot.x?'ArrowRight':'ArrowLeft';key(walkKey,true);
+  while(Math.abs(launch-s.pilot.x)>1.3&&n++<350)tick();key(walkKey,false);
+  if(n>=350)throw Error('Cannot reach launch '+i);
+  key(dir>0?'ArrowRight':'ArrowLeft',true);key('Space',true);tick(96);key('Space',false);tick();
+  n=0;while(!s.pilot.grounded&&s.state==='playing'&&n++<300)tick();key(dir>0?'ArrowRight':'ArrowLeft',false);
+  if(s.pilot.platformId!==i)throw Error('Miss '+i+' at '+s.pilot.x+','+s.pilot.y);
+  return {id:i,x:s.pilot.x,y:s.pilot.y,zone:s.zone};
  };
- window.qa={s,game,step,key,reset,jumpTo,render:()=>{for(let i=0;i<30;i++)game.step(clock+i*17,1000/60);}};
- reset();return s.state;
+ const campaignJump=(i)=>{
+  const w=s.level.platforms[i].witness,k=w.dir>0?'ArrowRight':'ArrowLeft';key(k,true);key('Space',true);tick(w.ticks);key('Space',false);tick();
+  let n=0;while(!s.pilot.grounded&&s.state==='playing'&&n++<300)tick();key(k,false);
+  if(s.pilot.platformId!==i)throw Error('Campaign miss '+i+' at '+s.pilot.x+','+s.pilot.y);
+  const cy=s.pilot.y-s.cameras.main.scrollY;if(cy<34||cy>s.scale.gameSize.height)throw Error('Camera lost player on '+i+': '+cy);
+ };
+ const render=()=>{s.drawPlayer();s.renderUI();clock+=17;game.step(clock,0);};
+ window.qa={s,game,key,tick,reset,jumpTo,campaignJump,render};return s.state;
 }'''
-checks = []
-def check(name, value):
- assert value, name
- checks.append(name)
- print('PASS', name, flush=True)
-
+checks=[]
+def check(name,value):
+ assert value,name
+ checks.append(name);print('PASS',name,flush=True)
 with sync_playwright() as p:
  browser=p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH','/usr/bin/chromium'),headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
- page=browser.new_page(viewport={'width':1440,'height':1150},has_touch=True)
- errors=[]
- page.on('pageerror',lambda e:errors.append(str(e)))
- # Exercise the offline fallback rather than relying on the CDN in every test.
+ page=browser.new_page(viewport={'width':1440,'height':900},has_touch=True)
+ errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
  page.route('https://cdn.jsdelivr.net/**',lambda r:r.abort())
  page.goto(BASE+'?qa=1');page.wait_for_function('window.__CIMA__')
- check('start screen and local Phaser 3.90.0 fallback',page.evaluate("__CIMA__.scene.state==='ready' && Phaser.VERSION==='3.90.0'") )
- check('only the game is shown and fills the viewport',page.evaluate("""()=>{const stage=document.querySelector('#stage').getBoundingClientRect(),canvas=document.querySelector('canvas').getBoundingClientRect();return !document.querySelector('header,aside,footer')&&Math.abs(stage.width-innerWidth)<2&&Math.abs(stage.height-innerHeight)<2&&Math.abs(canvas.width-innerWidth)<2&&Math.abs(canvas.height-innerHeight)<2&&document.documentElement.scrollHeight<=innerHeight;}"""))
- page.screenshot(path=str(OUT/'desktop-start.png'),full_page=True)
- page.click('#primary');check('start begins the run',page.evaluate(HARNESS)=='playing')
- check('ground movement and alternate key aliases',page.evaluate('''()=>{const{key,step,s}=qa;let x=s.player.x;key('ArrowRight',true);key('KeyD',true);step(10);key('ArrowRight',false);step(10);key('KeyD',false);step(2);return s.player.x>x+45&&s.player.body.velocity.x===0;}'''))
- heights=page.evaluate('''()=>{let result=[];for(const n of [3,49]){qa.reset();qa.key('Space',true);qa.step(n);qa.key('Space',false);qa.step(2);let top=qa.s.player.y;for(let i=0;i<70;i++){qa.step();top=Math.min(top,qa.s.player.y);}result.push(3240-top);}return result;}''')
- check('long charge jumps higher than short charge',heights[1]>heights[0]+100)
- check('direction stays locked in the air',page.evaluate('''()=>{qa.reset();qa.key('ArrowRight',true);qa.key('Space',true);qa.step(49);qa.key('Space',false);qa.step(3);qa.key('ArrowRight',false);qa.key('ArrowLeft',true);let x=qa.s.player.x;qa.step(10);qa.key('ArrowLeft',false);return qa.s.player.x>x+35&&qa.s.player.body.velocity.x===250;}'''))
- check('pause freezes position and timer and cancels charge',page.evaluate('''()=>{qa.reset();qa.key('Space',true);qa.step(20);qa.key('Escape',true);qa.key('Escape',false);let x=qa.s.player.x,y=qa.s.player.y,t=qa.s.elapsed;qa.step(120);const frozen=qa.s.state==='paused'&&qa.s.player.x===x&&qa.s.player.y===y&&qa.s.elapsed===t;qa.key('Space',false);qa.key('Escape',true);qa.key('Escape',false);qa.step(3);return frozen&&qa.s.state==='playing'&&!qa.s.charging&&qa.s.jumps===0;}'''))
- check('restart asks first, cancel resumes, confirm clears run',page.evaluate('''()=>{qa.key('KeyR',true);qa.key('KeyR',false);let asked=!document.querySelector('#overlay').hidden&&qa.s.state==='paused';document.querySelector('#secondary').click();const canceled=qa.s.state==='playing';qa.key('KeyR',true);qa.key('KeyR',false);document.querySelector('#primary').click();qa.step(3);return asked&&canceled&&qa.s.elapsed<100&&qa.s.jumps===0&&qa.s.falls===0&&qa.s.player.x===120;}'''))
- # A deliberate fall after ten genuine jumps verifies losing altitude without a checkpoint.
- fall=page.evaluate('''()=>{qa.reset();for(let i=1;i<=10;i++)qa.jumpTo(i);const before=qa.s.zone;qa.key('ArrowLeft',true);qa.step(37);qa.key('ArrowLeft',false);qa.step(150);return {before,after:qa.s.zone,falls:qa.s.falls,y:qa.s.player.y};}''')
- check('fall loses zones and does not respawn at a checkpoint',fall['falls']>=1 and fall['after']<fall['before'] and fall['y']>2040)
- # Isolated wall/underside fixtures, separate from the unmodified full route.
- check('solid underside blocks upward travel',page.evaluate('''()=>{qa.reset();qa.s.player.body.reset(300,3240);qa.step(3);qa.key('Space',true);qa.step(49);qa.key('Space',false);let top=3240;for(let i=0;i<60;i++){qa.step();top=Math.min(top,qa.s.player.body.top);}return top>=3143;}'''))
- check('world edge bounces airborne horizontal velocity',page.evaluate('''()=>{qa.reset();qa.s.player.body.reset(775,3020);qa.s.airVX=250;qa.s.player.setVelocity(250,-100);qa.step(15);return qa.s.player.body.velocity.x<0&&qa.s.player.body.right<=800;}'''))
- route=page.evaluate('''()=>{qa.reset();const route=[];for(let i=1;i<=25;i++)route.push(qa.jumpTo(i));qa.render();return {route,state:qa.s.state,jumps:qa.s.jumps,falls:qa.s.falls,elapsed:qa.s.elapsed,camera:qa.s.cameras.main.scrollY,record:localStorage.getItem('cima.best.v1')};}''')
- check('25 consecutive real jumps reach victory across five zones',route['state']=='won' and route['jumps']==25 and route['falls']==0 and set(x['zone'] for x in route['route'])=={0,1,2,3,4})
- check('camera follows to summit and winning time persists',route['camera']<500 and float(route['record'])>0)
- page.screenshot(path=str(OUT/'desktop-victory.png'),full_page=True)
- check('victory replay has no stale win state',page.evaluate('''()=>{document.querySelector('#primary').click();qa.step(5);return qa.s.state==='playing'&&qa.s.jumps===0&&qa.s.falls===0&&qa.s.highestZone===0&&qa.s.player.x===120&&qa.s.player.y===3240&&!document.querySelector('#toast').classList.contains('show');}'''))
- check('window blur pauses and releases controls',page.evaluate('''()=>{qa.key('ArrowRight',true);qa.key('Space',true);window.dispatchEvent(new Event('blur'));qa.step(5);return qa.s.state==='paused'&&!__CIMA__.input.right&&!__CIMA__.input.jump&&!qa.s.charging;}'''))
- # Real pointer events on mobile controls; no scene or input-field mutation.
- page.set_viewport_size({'width':390,'height':844});page.click('#primary')
- check('mobile layout has no horizontal overflow',page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+ check('local Phaser fallback, themed sprites and training gate',page.evaluate("__CIMA__.scene.state==='ready'&&Phaser.VERSION==='3.90.0'&&document.querySelector('#seed').disabled&&__CIMA__.game.textures.get('astronaut-art').has('beloved')"))
+ page.screenshot(path=str(OUT/'desktop-start.png'))
+ page.click('#primary');page.evaluate(HARNESS)
+ check('fullscreen game has no overflow',page.evaluate("document.documentElement.scrollHeight<=innerHeight&&Math.abs(document.querySelector('canvas').getBoundingClientRect().width-innerWidth)<2"))
+ check('aliases work together and release independently',page.evaluate('''()=>{qa.key('ArrowRight',true);qa.key('KeyD',true);qa.tick(12);qa.key('ArrowRight',false);qa.tick(12);qa.key('KeyD',false);qa.tick();return qa.s.pilot.x>148&&qa.s.pilot.vx===0;}'''))
+ check('charging locks walking and releasing commits the jump',page.evaluate('''()=>{qa.reset();qa.key('ArrowRight',true);qa.key('Space',true);qa.tick(48);const still=qa.s.pilot.x===120;qa.key('Space',false);qa.tick(4);qa.key('ArrowRight',false);qa.key('ArrowLeft',true);qa.tick(10);qa.key('ArrowLeft',false);return still&&qa.s.pilot.jumps===1&&qa.s.pilot.vx===250;}'''))
+ check('physics matches at 30, 60 and 144 rendering FPS',page.evaluate('''()=>{const results=[];for(const fps of [30,60,144]){qa.reset();__CIMA__.input.jump=true;for(let n=0;n<fps;n++)qa.s.update(0,1000/fps);__CIMA__.input.jump=false;for(let n=0;n<fps;n++)qa.s.update(0,1000/fps);results.push([qa.s.pilot.x,qa.s.pilot.y,qa.s.pilot.elapsed]);}return results.every(r=>r.every((v,i)=>Math.abs(v-results[0][i])<1e-6));}'''))
+ check('pause freezes simulation and cancels a pending jump',page.evaluate('''()=>{qa.reset();qa.key('Space',true);qa.tick(20);qa.key('Escape',true);qa.key('Escape',false);let t=qa.s.pilot.elapsed,y=qa.s.pilot.y;qa.tick(120);const ok=qa.s.state==='paused'&&qa.s.pilot.elapsed===t&&qa.s.pilot.y===y;qa.key('Space',false);qa.key('Escape',true);qa.key('Escape',false);qa.tick(3);return ok&&!qa.s.pilot.charging&&qa.s.pilot.jumps===0;}'''))
+ check('restart confirmation can be canceled',page.evaluate('''()=>{qa.key('KeyR',true);qa.key('KeyR',false);const asked=qa.s.state==='paused';document.querySelector('#secondary').click();return asked&&qa.s.state==='playing';}'''))
+ fall=page.evaluate('''()=>{qa.reset();for(let i=1;i<=11;i++)qa.jumpTo(i);const before=qa.s.zone;qa.key('ArrowLeft',true);qa.tick(74);qa.key('ArrowLeft',false);qa.tick(400);return {before,after:qa.s.zone,falls:qa.s.pilot.falls,y:qa.s.pilot.y};}''')
+ check('a real missed jump loses earlier zones without checkpoint respawn',fall['falls']>=1 and fall['after']<fall['before'])
+ route=page.evaluate('''()=>{qa.reset();const route=[];for(let i=1;i<=25;i++)route.push(qa.jumpTo(i));qa.render();return {route,state:qa.s.state,jumps:qa.s.pilot.jumps,falls:qa.s.pilot.falls,unlocked:localStorage.getItem('cima.training.complete.v2')};}''')
+ check('all 25 real training jumps unlock the expedition',route['state']=='training-complete' and route['jumps']==25 and route['falls']==0 and route['unlocked']=='yes')
+ page.screenshot(path=str(OUT/'training-complete.png'))
+ page.click('#primary')
+ check('training completion starts a distinct 40-platform campaign',page.evaluate("qa.s.level.kind==='campaign'&&qa.s.level.platforms.length===41&&qa.s.state==='playing'&&qa.s.pilot.jumps===0"))
+ page.evaluate("qa.s.startRun('campaign','LUNA');qa.tick(2);for(let i=1;i<=17;i++)qa.campaignJump(i);qa.tick(20);qa.render();")
+ page.screenshot(path=str(OUT/'campaign-orbit.png'))
+ saved=page.evaluate('''()=>{qa.s.saveRun();return {x:qa.s.pilot.x,y:qa.s.pilot.y,jumps:qa.s.pilot.jumps,seed:qa.s.level.seed};}''')
+ page.reload();page.wait_for_function('window.__CIMA__')
+ check('saved run offers continue',page.locator('#primary').inner_text()=='Continuar viaje')
+ page.click('#primary');page.evaluate(HARNESS)
+ check('reload restores exact position, seed and jump count',page.evaluate(f"Math.abs(qa.s.pilot.x-{saved['x']})<1e-5&&Math.abs(qa.s.pilot.y-{saved['y']})<1e-5&&qa.s.pilot.jumps===17&&qa.s.level.seed==='LUNA'"))
+ campaign=page.evaluate('''()=>{for(let i=18;i<=40;i++)qa.campaignJump(i);qa.render();return {state:qa.s.state,jumps:qa.s.pilot.jumps,falls:qa.s.pilot.falls,record:localStorage.getItem('cima.moon.best.v2.LUNA'),camera:qa.s.cameras.main.scrollY};}''')
+ check('continuous 40-jump campaign ends at beloved on Moon',campaign['state']=='won' and campaign['jumps']==40 and campaign['falls']==0)
+ check('record is scoped to the seed and completed save is removed',page.evaluate("Number(localStorage.getItem('cima.moon.best.v2.LUNA'))>0&&localStorage.getItem('cima.run.v2')===null"))
+ page.screenshot(path=str(OUT/'desktop-victory.png'))
+ old_seed=page.evaluate('qa.s.level.seed');page.click('#primary')
+ check('replay creates a new seed and resets counters',page.evaluate(f"qa.s.level.seed!=={json.dumps(old_seed)}&&qa.s.pilot.jumps===0&&qa.s.state==='playing'"))
+ check('continue restores a moving fall rather than a safe platform',page.evaluate("""()=>{qa.key('Space',true);qa.key('ArrowRight',true);qa.tick(96);qa.key('Space',false);qa.tick(90);qa.key('ArrowRight',false);const p=qa.s.pilot,y=p.y,vy=p.vy,x=p.x;const falling=!p.grounded&&vy>0;qa.s.pauseRun();qa.s.saved=qa.s.readSaved();qa.s.menu();qa.s.continueSaved();return falling&&qa.s.pilot.y===y&&qa.s.pilot.x===x&&qa.s.pilot.vy===vy&&!qa.s.pilot.grounded;}"""))
+ check('blur pauses and releases all controls',page.evaluate("()=>{qa.key('Space',true);window.dispatchEvent(new Event('blur'));qa.tick(10);return qa.s.state==='paused'&&!__CIMA__.input.jump&&!qa.s.pilot.charging;}"))
+ page.set_viewport_size({'width':390,'height':844});page.click('#primary');page.evaluate("qa.s.startRun('training');qa.render()")
+ check('mobile has no horizontal or vertical page overflow',page.evaluate('document.documentElement.scrollWidth<=innerWidth&&document.documentElement.scrollHeight<=innerHeight'))
  cdp=page.context.new_cdp_session(page)
- def touch(selector, event):
-  box=page.locator(selector).bounding_box()
-  cdp.send('Input.dispatchTouchEvent',{'type':event,'touchPoints':[{'x':box['x']+box['width']/2,'y':box['y']+box['height']/2,'id':1}] if event=='touchStart' else []})
- touch('[data-touch="jump"]','touchStart')
- page.evaluate('qa.step(49)')
- touch('[data-touch="jump"]','touchEnd')
- page.evaluate('qa.step(3)')
- check('touch hold and release launches a jump',page.evaluate('qa.s.jumps===1&&qa.s.player.body.velocity.y<0'))
- touch('[data-touch="left"]','touchStart')
- touch('[data-touch="left"]','touchCancel')
- check('canceled pointer releases its direction',page.evaluate('!__CIMA__.input.left'))
- page.evaluate('qa.render()')
- check('mobile canvas fills the viewport without stretching the scene',page.evaluate("""()=>{const canvas=document.querySelector('canvas').getBoundingClientRect(),size=qa.s.scale.gameSize;return Math.abs(canvas.width-innerWidth)<2&&Math.abs(canvas.height-innerHeight)<2&&Math.abs(canvas.width/canvas.height-size.width/size.height)<.002&&document.documentElement.scrollHeight<=innerHeight;}"""))
- page.screenshot(path=str(OUT/'mobile.png'),full_page=True)
- page.set_viewport_size({'width':844,'height':390})
- page.wait_for_function('Math.abs(__CIMA__.scene.scale.gameSize.height - 800 * innerHeight / innerWidth)<1')
- page.evaluate('qa.render()')
- check('landscape resize keeps controls inside the fullscreen game',page.evaluate("""()=>{const buttons=[...document.querySelectorAll('[data-touch]')];return buttons.every(b=>{const r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.left>=0&&r.right<=innerWidth;})&&document.documentElement.scrollHeight<=innerHeight;}"""))
- page.screenshot(path=str(OUT/'mobile-landscape.png'),full_page=True)
-
- check('no browser JavaScript errors',not errors)
- (OUT/'results.json').write_text(json.dumps({'checks':checks,'charge_heights':heights,'fall':fall,'full_route':route,'errors':errors},indent=2))
+ def touch(selector,event):
+  r=page.locator(selector).bounding_box();cdp.send('Input.dispatchTouchEvent',{'type':event,'touchPoints':[{'x':r['x']+r['width']/2,'y':r['y']+r['height']/2,'id':1}] if event=='touchStart' else []})
+ touch('[data-touch="jump"]','touchStart');page.evaluate('qa.tick(96)');touch('[data-touch="jump"]','touchEnd');page.evaluate('qa.tick(3)')
+ check('real touch hold/release launches the astronaut',page.evaluate('qa.s.pilot.jumps===1&&qa.s.pilot.vy<0'))
+ touch('[data-touch="left"]','touchStart');touch('[data-touch="left"]','touchCancel')
+ check('canceled touch releases its direction',page.evaluate('!__CIMA__.input.left'))
+ page.evaluate('qa.render()');page.screenshot(path=str(OUT/'mobile.png'))
+ page.set_viewport_size({'width':844,'height':390});page.wait_for_function('Math.abs(__CIMA__.scene.scale.gameSize.height-800*innerHeight/innerWidth)<1');page.evaluate('qa.render()')
+ check('landscape touch buttons remain inside viewport',page.evaluate("[...document.querySelectorAll('[data-touch]')].every(b=>{const r=b.getBoundingClientRect();return r.bottom<=innerHeight&&r.right<=innerWidth&&r.top>=0})"))
+ page.screenshot(path=str(OUT/'mobile-landscape.png'))
+ # Blocked or corrupt storage is nonfatal, as in private browsing.
+ page.evaluate("localStorage.setItem('cima.run.v2','broken');qa.s.saved=qa.s.readSaved();qa.s.menu();")
+ check('corrupt saved run returns to menu safely',page.evaluate('qa.s.saved===null&&qa.s.state===\'ready\''))
+ check('no JavaScript errors',not errors)
+ (OUT/'results.json').write_text(json.dumps({'checks':checks,'fall':fall,'training':route,'campaign':campaign,'errors':errors},indent=2))
  browser.close()
 print(f'{len(checks)} browser checks passed. Evidence: {OUT}')

@@ -1,411 +1,746 @@
 import {
   WORLD,
-  PLATFORMS,
-  GOAL,
-  ZONES,
-  jumpSpeed,
-  zoneAt,
+  Astronaut,
+  trainingLevel,
+  generateCampaign,
+  newSeed,
+  zoneFor,
   formatTime,
-  heightAt,
   readBest,
   writeBest,
+  campaignBestKey,
+  readUnlock,
+  writeUnlock,
 } from "./model.js";
+import { makeSprites, showSprite } from "./sprites.js";
 const $ = (id) => document.getElementById(id);
-const ui = Object.fromEntries(
-  [
-    "time",
-    "jumps",
-    "falls",
-    "best",
-    "altitude",
-    "charge-fill",
-    "charge-label",
-    "overlay",
-    "modal-title",
-    "modal-copy",
-    "primary",
-    "secondary",
-    "pause",
-    "sound",
-    "zone-title",
-    "stage",
-    "toast",
-  ].map((k) => [k, $(k)]),
-);
-const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const input = { left: false, right: false, jump: false };
-let soundOn = false,
+let scene,
   audio,
-  scene,
-  best = null;
+  soundOn = false,
+  unlocked = false;
 try {
-  best = readBest(localStorage);
-} catch {
-  /* Storage can be disabled. */
-}
-ui.best.textContent = best ? formatTime(best) : "—";
-function tone(freq, duration = 0.08, type = "sine", volume = 0.04) {
+  unlocked = readUnlock(localStorage);
+} catch {}
+const store = {
+  get(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set(key, val) {
+    try {
+      localStorage.setItem(key, val);
+    } catch {}
+  },
+  remove(key) {
+    try {
+      localStorage.removeItem(key);
+    } catch {}
+  },
+};
+function tone(freq, length = 0.07, type = "sine") {
   if (!soundOn) return;
   try {
-    audio ||= new (window.AudioContext || window.webkitAudioContext)();
+    audio ??= new (window.AudioContext || window.webkitAudioContext)();
     audio.resume();
     const o = audio.createOscillator(),
       g = audio.createGain();
     o.type = type;
     o.frequency.setValueAtTime(freq, audio.currentTime);
     o.frequency.exponentialRampToValueAtTime(
-      freq * 0.65,
-      audio.currentTime + duration,
+      freq * 0.7,
+      audio.currentTime + length,
     );
-    g.gain.setValueAtTime(volume, audio.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + duration);
+    g.gain.setValueAtTime(0.025, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + length);
     o.connect(g);
     g.connect(audio.destination);
     o.start();
-    o.stop(audio.currentTime + duration);
-  } catch {
-    /* Audio is optional. */
-  }
+    o.stop(audio.currentTime + length);
+  } catch {}
 }
 function toast(message) {
-  ui.toast.textContent = message;
-  ui.toast.classList.add("show");
+  $("toast").textContent = message;
+  $("toast").classList.add("show");
   clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => ui.toast.classList.remove("show"), 2500);
+  toast.timer = setTimeout(() => $("toast").classList.remove("show"), 4200);
 }
 function clearInput() {
-  for (const key of Object.keys(input)) input[key] = false;
+  Object.keys(input).forEach((k) => (input[k] = false));
+  scene?.held?.clear();
+  scene?.pilot?.cancelCharge();
   document
     .querySelectorAll("[data-touch]")
     .forEach((b) => b.classList.remove("held"));
-  if (scene) {
-    scene.charging = false;
-    scene.charge = 0;
-    scene.wasJump = false;
-  }
 }
-function modal(mode) {
+function showModal(title, copy, primary, action, secondary, other) {
   clearInput();
-  ui.overlay.hidden = false;
-  ui.secondary.hidden = true;
-  ui["modal-copy"].hidden = true;
-  if (mode === "paused") {
-    ui["modal-title"].textContent = "Pausa";
-    ui.primary.textContent = "Continuar";
-    ui.primary.onclick = () => scene.resume();
-    ui.secondary.hidden = false;
-    ui.secondary.textContent = "Reiniciar";
-    ui.secondary.onclick = () => modal("reset");
-  } else if (mode === "reset") {
-    ui["modal-title"].textContent = "¿Reiniciar?";
-    ui.primary.textContent = "Volver al inicio";
-    ui.primary.onclick = () => scene.startRun();
-    ui.secondary.hidden = false;
-    ui.secondary.textContent = "Cancelar";
-    ui.secondary.onclick = () => scene.resume();
-  } else if (mode === "won") {
-    ui["modal-title"].textContent = "¡Cima!";
-    ui["modal-copy"].hidden = false;
-    ui["modal-copy"].textContent =
-      `${formatTime(scene.elapsed)} · ${scene.jumps} saltos · ${scene.falls} caídas${scene.newRecord ? " · Nuevo récord" : ""}`;
-    ui.primary.textContent = "Jugar de nuevo";
-    ui.primary.onclick = () => scene.startRun();
-  }
-  requestAnimationFrame(() => ui.primary.focus({ preventScroll: true }));
+  $("overlay").hidden = false;
+  $("modal-title").textContent = title;
+  $("modal-copy").textContent = copy;
+  $("primary").textContent = primary;
+  $("primary").onclick = action;
+  $("secondary").hidden = !secondary;
+  $("secondary").textContent = secondary || "";
+  $("secondary").onclick = other;
+  $("mission-options").hidden = true;
+  $("training-choice").hidden = true;
+  $("menu-choice").hidden = true;
+  requestAnimationFrame(() => $("primary").focus({ preventScroll: true }));
 }
 const viewportHeight = () =>
   Math.round((WORLD.width * $("game").clientHeight) / $("game").clientWidth);
-
-class Climb extends Phaser.Scene {
+class Moonbound extends Phaser.Scene {
   constructor() {
-    super("Climb");
+    super("Moonbound");
+  }
+  preload() {
+    this.load.image("astronaut-art", "./assets/astronaut-concepts.png");
   }
   create() {
     scene = this;
     this.state = "ready";
-    this.elapsed = 0;
-    this.jumps = 0;
-    this.falls = 0;
+    this.held = new Set();
+    this.accumulator = 0;
+    this.facing = 1;
     this.zone = -1;
     this.highestZone = 0;
-    this.charge = 0;
-    this.charging = false;
-    this.wasJump = false;
-    this.airVX = 0;
-    this.lastBounce = -Infinity;
-    this.dropOrigin = WORLD.ground;
-    this.fallCounted = false;
-    this.physics.world.setBounds(0, 0, WORLD.width, WORLD.height);
-    this.physics.world.setBoundsCollision(true, true, true, false);
-    this.makeTextures();
-    this.sky = this.add.graphics().setScrollFactor(0).setDepth(-20);
-    this.detail = this.add.graphics().setDepth(-5);
-    this.paintWorld();
-    this.platforms = this.physics.add.staticGroup();
-    for (const p of PLATFORMS) {
-      const block = this.add.rectangle(p.x, p.y + 12, p.width, 24, 0x000000, 0);
-      this.physics.add.existing(block, true);
-      block.platformId = p.id;
-      this.platforms.add(block);
-    }
-    this.player = this.physics.add
-      .sprite(120, WORLD.ground, "knight")
+    makeSprites(this);
+    this.sky = this.add.graphics().setScrollFactor(0).setDepth(-30);
+    this.decor = this.add.graphics().setScrollFactor(0.18).setDepth(-20);
+    this.terrain = this.add.graphics().setDepth(-2);
+    this.fx = this.add.graphics().setDepth(1);
+    this.player = this.add
+      .sprite(120, 3240, "astronaut-art", "idle")
       .setOrigin(0.5, 1)
-      .setDepth(5);
-    this.player.body.setSize(WORLD.playerW, WORLD.playerH).setOffset(5, 10);
-    this.player.setCollideWorldBounds(true);
-    this.player.body.setMaxVelocity(500, 1100);
-    this.physics.add.collider(this.player, this.platforms, (_player, block) => {
-      if (this.player.body.blocked.down) this.lastPlatform = block.platformId;
-    });
-    this.cameras.main.setBounds(0, 0, WORLD.width, WORLD.height);
-    this.cameras.main.startFollow(
-      this.player,
-      true,
-      1,
-      reducedMotion ? 1 : 0.14,
-      0,
-      -100,
-    );
-    this.resetCamera();
-    this.chargeRing = this.add.graphics().setDepth(4);
-    this.crown = this.add.image(GOAL.x, GOAL.y - 45, "crown").setDepth(3);
-    this.goalGlow = this.add
-      .circle(GOAL.x, GOAL.y - 44, 34, 0xe2bd70, 0.1)
-      .setDepth(1);
-    if (!reducedMotion)
-      this.tweens.add({
-        targets: [this.crown, this.goalGlow],
-        y: "-=7",
-        duration: 1500,
-        yoyo: true,
-        repeat: -1,
-        ease: "Sine.inOut",
-      });
-    this.physics.pause();
-    this.paintSky(0);
-    this.renderUI();
+      .setDepth(4);
+    this.beloved = this.add
+      .sprite(0, 0, "astronaut-art", "beloved")
+      .setOrigin(0.5, 1)
+      .setFlipX(false)
+      .setDepth(3);
+    this.loadLevel(trainingLevel());
     this.bindControls();
     this.resizeView();
-    const observer = new ResizeObserver(() => {
-      const height = viewportHeight();
-      if (this.scale.gameSize.height !== height)
-        this.scale.setGameSize(WORLD.width, height);
-      this.resizeView();
-    });
+    const observer = new ResizeObserver(() => this.resizeView());
     observer.observe($("game"));
     this.events.once("shutdown", () => observer.disconnect());
-    ui.primary.onclick = () => this.startRun();
-    ui.primary.focus({ preventScroll: true });
-    this.game.events.on("blur", () => this.pauseRun());
+    this.saved = this.readSaved();
+    this.menu();
     if (new URLSearchParams(location.search).has("qa"))
       window.__CIMA__ = {
         game: this.game,
         scene: this,
         input,
         WORLD,
-        PLATFORMS,
+        get level() {
+          return scene.level;
+        },
+        Astronaut,
+        generateCampaign,
       };
   }
+  loadLevel(level) {
+    this.level = level;
+    this.pilot = new Astronaut(level);
+    this.goal = level.goal;
+    this.zone = -1;
+    this.highestZone = 0;
+    this.facing = 1;
+    this.accumulator = 0;
+    this.saveClock = 0;
+    this.landUntil = 0;
+    this.bestKey =
+      level.kind === "training"
+        ? "cima.training.best.v2"
+        : campaignBestKey(level.seed);
+    this.best = null;
+    try {
+      this.best = readBest(localStorage, this.bestKey);
+    } catch {}
+    this.paintTerrain();
+    this.paintSky(0);
+    this.beloved
+      .setVisible(level.kind === "campaign")
+      .setPosition(this.goal.x, this.goal.y);
+    showSprite(this.beloved, "beloved");
+    this.player.setPosition(this.pilot.x, this.pilot.y).setFlipX(false);
+    showSprite(this.player, "idle");
+    this.cameras.main.setBounds(0, 0, 800, level.ground + this.bottomReserve());
+    this.resetCamera();
+    this.renderUI();
+  }
+  menu() {
+    this.state = "ready";
+    $("pause").disabled = true;
+    showModal(
+      "Hasta la Luna",
+      "Ella te espera al otro lado de las estrellas. Aprende a saltar. Después, emprende un viaje que solo tú puedes completar.",
+      this.saved ? "Continuar viaje" : "Entrenar",
+      () => (this.saved ? this.continueSaved() : this.startRun("training")),
+      unlocked ? "Nueva expedición" : null,
+      () => this.startCampaign(),
+    );
+    $("mission-options").hidden = false;
+    $("seed").value = this.saved?.kind === "campaign" ? this.saved.seed : "";
+    $("seed").disabled = !unlocked;
+    $("training-choice").hidden = !unlocked;
+    $("training-choice").onclick = () => this.startRun("training");
+    $("unlock-note").textContent = unlocked
+      ? "Sin checkpoints · Un mundo por semilla"
+      : "Completa el entrenamiento para abrir la expedición.";
+  }
+  startRun(kind = this.level.kind, seed) {
+    clearInput();
+    clearTimeout(toast.timer);
+    $("toast").classList.remove("show");
+    if (kind === "campaign" && !unlocked && this.state !== "training-complete")
+      return;
+    let level;
+    try {
+      level =
+        kind === "campaign"
+          ? generateCampaign(seed || newSeed())
+          : trainingLevel();
+    } catch (error) {
+      console.error(error);
+      toast("No se pudo generar la expedición. Prueba otra semilla.");
+      return;
+    }
+    this.loadLevel(level);
+    this.state = "playing";
+    this.highestZone = 0;
+    this.newRecord = false;
+    this.saved = null;
+    store.remove("cima.run.v2");
+    $("overlay").hidden = true;
+    $("pause").disabled = false;
+    $("pause").textContent = "Pausa";
+    $("primary").blur();
+    $("mission-status").textContent =
+      kind === "training"
+        ? "ENTRENAMIENTO · 25 SALTOS"
+        : "EXPEDICIÓN · " + level.seed;
+    toast(
+      kind === "training"
+        ? "← → / A D: dirección · Mantén ESPACIO y suelta para saltar"
+        : "«Guardé un sitio para ti en la Luna.» — L",
+    );
+    tone(440, 0.12);
+    this.saveRun();
+  }
+  startCampaign() {
+    this.startRun("campaign", $("seed").value.trim() || undefined);
+  }
+  pauseRun() {
+    if (this.state !== "playing") return;
+    this.state = "paused";
+    this.saveRun();
+    this.accumulator = 0;
+    showModal(
+      "Un respiro",
+      this.level.kind === "training"
+        ? "Estás entrenando para llegar a la Luna."
+        : `Semilla ${this.level.seed} · ${this.level.zones[this.zone].hint}`,
+      "Continuar",
+      () => this.resume(),
+      "Volver al inicio",
+      () => this.confirmReset(),
+    );
+    $("pause").textContent = "Seguir";
+    $("menu-choice").hidden = false;
+    $("menu-choice").onclick = () => {
+      this.saved = this.readSaved();
+      $("menu-choice").hidden = true;
+      this.menu();
+    };
+  }
+  resume() {
+    if (this.state !== "paused") return;
+    clearInput();
+    this.state = "playing";
+    this.accumulator = 0;
+    $("overlay").hidden = true;
+    $("menu-choice").hidden = true;
+    $("primary").blur();
+    $("pause").textContent = "Pausa";
+  }
+  confirmReset() {
+    this.state = "paused";
+    $("menu-choice").hidden = true;
+    showModal(
+      "¿Volver a empezar?",
+      this.level.kind === "campaign"
+        ? "Se perderá este ascenso y se generará una semilla nueva."
+        : "El entrenamiento volverá al primer salto.",
+      "Reiniciar",
+      () => this.startRun(this.level.kind),
+      "Cancelar",
+      () => this.resume(),
+    );
+  }
+  complete() {
+    if (this.state !== "playing") return;
+    this.newRecord = !this.best || this.pilot.elapsed < this.best;
+    if (this.newRecord) {
+      this.best = this.pilot.elapsed;
+      try {
+        writeBest(localStorage, this.best, this.bestKey);
+      } catch {}
+    }
+    this.renderUI();
+    store.remove("cima.run.v2");
+    tone(880, 0.4, "triangle");
+    const stats = `${formatTime(this.pilot.elapsed)} · ${this.pilot.jumps} saltos · ${this.pilot.falls} caídas`;
+    if (this.level.kind === "training") {
+      unlocked = true;
+      try {
+        writeUnlock(localStorage);
+      } catch {}
+      this.state = "training-complete";
+      showModal(
+        "Listo para las estrellas",
+        `Entrenamiento completado. ${stats}. Tu viaje empieza ahora.`,
+        "Partir hacia la Luna",
+        () => this.startRun("campaign"),
+        "Repetir entrenamiento",
+        () => this.startRun("training"),
+      );
+    } else {
+      this.state = "won";
+      this.player.setPosition(this.goal.x - 14, this.goal.y);
+      this.beloved.setX(this.goal.x + 14);
+      showModal(
+        "Por fin, contigo",
+        "«Miraba la Tierra cada noche, esperando tu luz.»\n" +
+          stats +
+          (this.newRecord ? " · Récord de esta semilla" : ""),
+        "Otra expedición",
+        () => this.startRun("campaign"),
+        "Volver al entrenamiento",
+        () => this.startRun("training"),
+      );
+    }
+    $("pause").disabled = true;
+  }
+  saveRun() {
+    if (!["playing", "paused"].includes(this.state)) return;
+    const p = this.pilot;
+    store.set(
+      "cima.run.v2",
+      JSON.stringify({
+        version: 2,
+        kind: this.level.kind,
+        seed: this.level.seed,
+        x: p.x,
+        y: p.y,
+        vx: p.vx,
+        vy: p.vy,
+        grounded: p.grounded,
+        platformId: p.platformId,
+        jumps: p.jumps,
+        falls: p.falls,
+        elapsed: p.elapsed,
+        peak: p.peak,
+        fallCounted: p.fallCounted,
+        highestZone: this.highestZone,
+      }),
+    );
+  }
+  readSaved() {
+    try {
+      const s = JSON.parse(store.get("cima.run.v2"));
+      if (
+        !s ||
+        s.version !== 2 ||
+        !["training", "campaign"].includes(s.kind) ||
+        typeof s.seed !== "string" ||
+        (s.kind === "campaign" && !unlocked)
+      )
+        return null;
+      if (
+        ![
+          "x",
+          "y",
+          "vx",
+          "vy",
+          "jumps",
+          "falls",
+          "elapsed",
+          "peak",
+          "platformId",
+          "highestZone",
+        ].every((k) => Number.isFinite(s[k]))
+      )
+        return null;
+      if (
+        s.x < 11 ||
+        s.x > 789 ||
+        s.y < 0 ||
+        s.y > 5800 ||
+        Math.abs(s.vx) > 500 ||
+        Math.abs(s.vy) > 1100 ||
+        s.elapsed < 0 ||
+        s.jumps < 0 ||
+        s.falls < 0
+      )
+        return null;
+      return s;
+    } catch {
+      return null;
+    }
+  }
+  continueSaved() {
+    const s = this.saved;
+    if (!s) return;
+    this.startRun(s.kind, s.seed);
+    Object.assign(
+      this.pilot,
+      ...[
+        "x",
+        "y",
+        "vx",
+        "vy",
+        "grounded",
+        "platformId",
+        "jumps",
+        "falls",
+        "elapsed",
+        "peak",
+        "fallCounted",
+      ].map((k) => ({ [k]: s[k] })),
+    );
+    this.highestZone = Math.max(0, Math.min(4, s.highestZone));
+    this.paintSky(zoneFor(this.level, s.y));
+    this.resetCamera();
+    this.renderUI();
+    this.saveRun();
+  }
+  tick() {
+    if (this.state !== "playing") return;
+    const p = this.pilot,
+      oldJumps = p.jumps;
+    p.step(input);
+    if (p.grounded && !p.charging && input.left !== input.right)
+      this.facing = input.left ? -1 : 1;
+    if (p.jumps !== oldJumps) {
+      if (input.left !== input.right) this.facing = input.left ? -1 : 1;
+      tone(340 + p.charge * 220, 0.1, "triangle");
+    }
+    if (p.landed) {
+      this.landUntil = p.elapsed + 110;
+      tone(170, 0.05);
+    }
+    if (p.bounced) tone(110, 0.05);
+    const z = zoneFor(this.level, p.y);
+    if (z !== this.zone) {
+      this.paintSky(z);
+      if (z > this.highestZone) {
+        this.highestZone = z;
+        toast(
+          this.level.kind === "campaign"
+            ? this.level.zones[z].message
+            : this.trainingHint(z),
+        );
+      }
+    }
+    if (p.grounded && p.platformId === this.goal.id) {
+      this.complete();
+      return;
+    }
+    this.saveClock += WORLD.step;
+    if (this.saveClock >= 1) {
+      this.saveClock = 0;
+      this.saveRun();
+    }
+  }
+  trainingHint(z) {
+    return [
+      "",
+      "La carga decide la altura. No puedes corregir en el aire.",
+      "Los techos detienen el salto; las paredes te hacen rebotar.",
+      "Al caer, puedes volver a plataformas anteriores.",
+      "Últimos saltos. En la cima comienza tu viaje.",
+    ][z];
+  }
+  update(_time, delta) {
+    if (this.state === "playing") {
+      this.accumulator += Math.min(delta, 250) / 1000;
+      while (this.accumulator + 1e-9 >= WORLD.step) {
+        this.tick();
+        this.accumulator = Math.max(0, this.accumulator - WORLD.step);
+        if (this.state !== "playing") break;
+      }
+    }
+    this.drawPlayer();
+    this.followCamera(Math.min(delta, 100) / 1000);
+    this.renderUI();
+  }
+  drawPlayer() {
+    const p = this.pilot;
+    let frame = p.state;
+    if (p.grounded && !p.charging && p.elapsed < this.landUntil) frame = "land";
+    if (this.state === "won") {
+      frame = "reunion";
+      this.player.setPosition(this.goal.x, this.goal.y);
+      this.beloved.setVisible(false);
+    }
+    if (frame === "walk")
+      frame = Math.floor(p.elapsed / 120) % 2 ? "walk1" : "walk2";
+    if (this.state !== "won") this.player.setPosition(p.x, p.y);
+    showSprite(this.player, frame);
+    this.player.setFlipX(this.facing < 0);
+    const g = this.fx;
+    g.clear();
+    g.fillStyle(0x0a1228, 0.35);
+    g.fillEllipse(p.x, p.y + 2, 28, 6);
+    if (p.charging) {
+      g.lineStyle(2, 0xf4c99a, 0.7);
+      g.beginPath();
+      g.arc(
+        p.x,
+        p.y - 18,
+        28,
+        -Math.PI / 2,
+        -Math.PI / 2 + Math.PI * 2 * p.charge,
+        false,
+      );
+      g.strokePath();
+    }
+    if (this.state === "won")
+      this.heart(g, this.goal.x, this.goal.y - 60, 0xe8a7b7, 2);
+  }
   resizeView() {
-    const height = this.scale.gameSize.height;
-    this.cameras.main.setSize(WORLD.width, height);
-    // Reserve room above the touch controls while keeping every platform visible.
-    this.cameraBottom =
-      WORLD.ground + (80 * WORLD.width) / $("game").clientWidth;
-    this.cameras.main.setBounds(0, 0, WORLD.width, this.cameraBottom);
-    this.cameras.main.setFollowOffset(0, -Math.min(100, height / 6));
-    this.sky.setScale(1, height / 600);
+    const h = viewportHeight();
+    if (this.scale.gameSize.height !== h) this.scale.setGameSize(800, h);
+    this.cameras.main.setSize(800, h);
+    this.cameras.main.setBounds(
+      0,
+      0,
+      800,
+      this.level.ground + this.bottomReserve(),
+    );
     this.paintSky(Math.max(0, this.zone));
-    if (this.state === "ready") this.resetCamera();
+    this.resetCamera();
+  }
+  bottomReserve() {
+    return (
+      ((matchMedia("(pointer: coarse), (max-width: 950px)").matches
+        ? 220
+        : 110) *
+        800) /
+      $("game").clientWidth
+    );
   }
   resetCamera() {
-    const bottom =
-      this.cameraBottom ??
-      WORLD.ground + (80 * WORLD.width) / $("game").clientWidth;
-    this.cameras.main.setScroll(
+    const h = this.scale.gameSize.height;
+    this.cameras.main.scrollY = Math.max(
       0,
-      Math.max(0, bottom - this.scale.gameSize.height),
+      Math.min(
+        this.level.ground + this.bottomReserve() - h,
+        this.pilot.y - h * 0.62,
+      ),
     );
   }
-  makeTextures() {
-    const g = this.make.graphics({ x: 0, y: 0, add: false });
-    for (const crouch of [false, true]) {
-      g.clear();
-      const d = crouch ? 5 : 0;
-      g.fillStyle(0x233442);
-      g.fillRect(7, 36, 7, 8);
-      g.fillRect(19, 36, 7, 8);
-      g.fillStyle(0xa85442);
-      g.fillRect(4, 17 + d, 18, 18 - d);
-      g.fillRect(2, 29, 8, 9);
-      g.fillStyle(0xdbc89b);
-      g.fillRect(10, 24 + d, 15, 12 - d);
-      g.fillStyle(0x435d66);
-      g.fillRect(8, 9 + d, 19, 17);
-      g.fillStyle(0xb8c5be);
-      g.fillRect(9, 7 + d, 16, 14);
-      g.fillRect(6, 14 + d, 23, 9);
-      g.fillStyle(0x263d48);
-      g.fillRect(13, 14 + d, 14, 4);
-      g.fillStyle(0xe0ba67);
-      g.fillRect(11, 6 + d, 4, 4);
-      g.fillRect(10, 2 + d, 3, 5);
-      g.fillRect(16, 3 + d, 3, 4);
-      g.fillStyle(0x839a98);
-      g.fillRect(24, 24 + d, 5, 10 - d);
-      g.fillStyle(0xe1d8b5);
-      g.fillRect(9, 25 + d, 4, 8 - d);
-      g.generateTexture(crouch ? "crouch" : "knight", 32, 44);
-    }
-    g.clear();
-    g.fillStyle(0xf2d38b);
-    g.fillPoints(
-      [
-        { x: 2, y: 4 },
-        { x: 10, y: 10 },
-        { x: 16, y: 0 },
-        { x: 22, y: 10 },
-        { x: 30, y: 4 },
-        { x: 27, y: 24 },
-        { x: 5, y: 24 },
-      ],
-      true,
+  followCamera(dt) {
+    if (this.state === "ready") return;
+    const c = this.cameras.main,
+      h = this.scale.gameSize.height,
+      y = this.player.y;
+    const bottom = Math.max(h * 0.54, h - this.bottomReserve() - 85);
+    let target = c.scrollY;
+    if (y - c.scrollY < h * 0.38) target = y - h * 0.38;
+    else if (y - c.scrollY > bottom) target = y - bottom;
+    c.scrollY += (target - c.scrollY) * (reduced ? 1 : 1 - Math.exp(-12 * dt));
+    c.scrollY = Math.max(
+      y - h + Math.min(48, h * 0.18),
+      Math.min(y - 38, c.scrollY),
     );
-    g.fillStyle(0xb47a40);
-    g.fillRect(5, 24, 22, 4);
-    g.fillStyle(0xeff5e5);
-    g.fillRect(15, 13, 3, 5);
-    g.generateTexture("crown", 32, 30);
-    g.destroy();
+    c.scrollY = Math.max(
+      0,
+      Math.min(
+        Math.max(0, this.level.ground + this.bottomReserve() - h),
+        c.scrollY,
+      ),
+    );
   }
   paintSky(zone) {
     this.zone = zone;
-    const c = ZONES[zone],
-      g = this.sky;
+    const z = this.level.zones[zone],
+      g = this.sky,
+      h = this.scale.gameSize.height;
     g.clear();
-    g.fillStyle(c.sky);
-    g.fillRect(0, 0, 800, 600);
-    g.fillStyle(zone === 4 ? 0xeed7a0 : 0xe9e6c7, zone === 4 ? 0.95 : 0.65);
-    const sunSize = zone === 4 ? 64 : 86;
-    g.fillEllipse(646, 106, sunSize, sunSize / this.sky.scaleY);
-    if (zone === 4) {
-      g.fillStyle(0xe4e1cd, 0.7);
-      for (let i = 0; i < 38; i++)
-        g.fillRect((i * 137 + 71) % 800, (i * 83 + 20) % 330, 2, 2);
-    } else {
-      g.fillStyle(0xf5f3dd, 0.3);
-      for (let i = 0; i < 5; i++) {
-        const x = i * 185 - 30,
-          y = 90 + (i % 3) * 53;
-        g.fillRect(x, y, 100, 12);
-        g.fillRect(x + 20, y - 8, 50, 10);
+    g.fillStyle(z.sky);
+    g.fillRect(0, 0, 800, h);
+    for (let i = 0; i < 110; i++) {
+      const x = (i * 173 + 41) % 800,
+        y = (i * 127 + 19) % Math.ceil(h);
+      g.fillStyle(i % 7 === 0 ? 0xf1c8b4 : 0xc5dce7, i % 4 === 0 ? 0.7 : 0.3);
+      g.fillRect(x, y, i % 7 === 0 ? 3 : 2, 2);
+    }
+    const mx = 650,
+      my = Math.min(170, h * 0.23),
+      rad = 40 + zone * 4;
+    g.fillStyle(0xf2d3bf, 0.04);
+    g.fillCircle(mx, my, rad + 32);
+    g.fillStyle(0xf2d3bf, 0.08);
+    g.fillCircle(mx, my, rad + 13);
+    g.fillStyle(0xe6d8d0);
+    g.fillCircle(mx, my, rad);
+    g.fillStyle(0xbebbc7, 0.65);
+    g.fillCircle(mx - 13, my + 5, 9);
+    g.fillCircle(mx + 17, my - 9, 7);
+    g.fillCircle(mx + 7, my + 21, 5);
+    this.heart(g, mx + rad - 1, my - rad + 4, 0xeaabbc, 1);
+    g.fillStyle(z.far, 0.65);
+    g.fillPoints(
+      [
+        { x: 0, y: h },
+        { x: 0, y: h * 0.82 },
+        { x: 90, y: h * 0.68 },
+        { x: 180, y: h * 0.82 },
+        { x: 370, y: h * 0.7 },
+        { x: 560, y: h * 0.89 },
+        { x: 700, y: h * 0.7 },
+        { x: 800, y: h * 0.82 },
+        { x: 800, y: h },
+      ],
+      true,
+    );
+    if (zone < 2) {
+      g.fillStyle(0xd4dae6, 0.08);
+      for (let i = 0; i < 7; i++) {
+        g.fillRect(i * 150 - 70, h * 0.55 + (i % 3) * 35, 150, 10);
+        g.fillRect(i * 150 - 42, h * 0.55 + (i % 3) * 35 - 8, 87, 9);
       }
     }
-    g.fillStyle(c.far);
-    g.fillPoints(
-      [
-        { x: 0, y: 380 },
-        { x: 70, y: 280 },
-        { x: 180, y: 340 },
-        { x: 310, y: 180 },
-        { x: 450, y: 340 },
-        { x: 590, y: 230 },
-        { x: 800, y: 350 },
-        { x: 800, y: 600 },
-        { x: 0, y: 600 },
-      ],
-      true,
-    );
-    g.fillStyle(c.near, 0.6);
-    g.fillPoints(
-      [
-        { x: 0, y: 485 },
-        { x: 150, y: 345 },
-        { x: 260, y: 420 },
-        { x: 420, y: 330 },
-        { x: 580, y: 470 },
-        { x: 710, y: 370 },
-        { x: 800, y: 460 },
-        { x: 800, y: 600 },
-        { x: 0, y: 600 },
-      ],
-      true,
-    );
-    g.fillStyle(c.sky, 0.18);
-    for (let i = 0; i < 4; i++) g.fillRect(0, 450 + i * 38, 800, 15 + i * 7);
-    ui.stage.classList.toggle("night", zone === 4);
+    const d = this.decor;
+    d.clear();
+    d.fillStyle(z.near, 0.8);
+    for (let i = 0; i < 10; i++) {
+      const x = (i * 193) % 800,
+        yy = 120 + i * 90;
+      d.fillRect(x, yy, 12, 150);
+      d.fillRect(x - 16, yy + 16, 44, 5);
+      if (zone === 2) {
+        d.fillStyle(0x476888, 0.35);
+        d.fillRect(x - 35, yy + 22, 82, 36);
+        d.fillStyle(z.near, 0.8);
+      }
+    }
+    $("stage").classList.add("night");
   }
-  paintWorld() {
-    const g = this.detail;
-    for (const p of PLATFORMS) {
-      const c = ZONES[p.zone],
+  heart(g, x, y, color, scale = 1) {
+    g.fillStyle(color);
+    g.fillRect(x - 4 * scale, y, 3 * scale, 3 * scale);
+    g.fillRect(x + scale, y, 3 * scale, 3 * scale);
+    g.fillRect(x - 3 * scale, y + 2 * scale, 6 * scale, 3 * scale);
+    g.fillRect(x - 2 * scale, y + 5 * scale, 4 * scale, 2 * scale);
+    g.fillRect(x - scale, y + 7 * scale, 2 * scale, scale);
+  }
+  paintTerrain() {
+    const g = this.terrain;
+    g.clear();
+    for (const p of this.level.platforms) {
+      const c = this.level.zones[p.zone],
         left = p.x - p.width / 2;
-      g.fillStyle(0x142d3d, 0.15);
-      g.fillRect(left + 5, p.y + 9, p.width, 27);
+      g.fillStyle(0x070f23, 0.4);
+      g.fillRect(left + 4, p.y + 7, p.width, 24);
       g.fillStyle(c.stone);
       g.fillRect(left, p.y, p.width, 24);
       g.fillStyle(c.top);
-      g.fillRect(left, p.y, p.width, 5);
-      g.fillStyle(0x1c3840, 0.22);
+      g.fillRect(left, p.y, p.width, 4);
+      g.fillStyle(0x132239, 0.7);
       g.fillRect(left, p.y + 20, p.width, 4);
-      for (let j = 16; j < p.width; j += 31) {
-        g.fillRect(left + j, p.y + 9 + (j % 2) * 3, 13, 2);
-        g.fillRect(left + j + 5, p.y + 12, 2, 8);
+      for (let j = 8; j < p.width - 6; j += 22) {
+        g.fillStyle(0x1d2f49, 0.5);
+        g.fillRect(left + j, p.y + 8, 14, 7);
+        g.fillStyle(c.top, 0.6);
+        g.fillRect(left + j, p.y + 9, 2, 2);
       }
-      g.fillStyle(c.top, 0.7);
-      for (let j = 8; j < p.width - 8; j += 19)
-        g.fillRect(left + j, p.y - 3, 3, 4);
-      if (p.id % 5 === 1 && p.id > 1) {
-        const y = p.y + 45;
-        g.fillStyle(c.stone, 0.4);
-        g.fillRect(left + 15, y, 22, 90);
-        g.fillRect(left + 10, y, 32, 9);
-        g.fillRect(left + 8, y + 81, 36, 9);
-      }
-      if (p.zone === 1 && p.id % 2 === 0) {
-        g.fillStyle(0x365d54);
-        g.fillRect(left + 15, p.y - 46, 7, 46);
-        g.fillStyle(0x477c67);
-        g.fillTriangle(
-          left - 8,
-          p.y - 35,
-          left + 44,
-          p.y - 35,
-          left + 18,
-          p.y - 86,
-        );
-        g.fillTriangle(
-          left - 2,
-          p.y - 51,
-          left + 38,
-          p.y - 51,
-          left + 18,
-          p.y - 96,
-        );
-      }
-      if (p.zone === 2 && p.id % 2 === 1) {
+      if (this.level.kind === "campaign" && p.zone === 3) {
         g.fillStyle(c.stone);
-        g.fillRect(left + 12, p.y - 49, 13, 49);
-        g.fillRect(left + 8, p.y - 53, 22, 7);
-        g.fillStyle(c.top);
-        g.fillRect(left + 8, p.y - 55, 22, 3);
+        g.fillTriangle(
+          left,
+          p.y + 20,
+          left + p.width,
+          p.y + 20,
+          p.x + 8,
+          p.y + 47,
+        );
+      } else if (this.level.kind === "campaign" && p.zone === 4) {
+        g.fillStyle(c.top, 0.4);
+        g.fillRect(left + 3, p.y + 4, p.width - 6, 3);
+      } else {
+        g.fillStyle(c.stone, 0.65);
+        g.fillTriangle(
+          left + 8,
+          p.y + 24,
+          left + 18,
+          p.y + 24,
+          left + 12,
+          p.y + 38,
+        );
+        g.fillTriangle(
+          left + p.width - 18,
+          p.y + 24,
+          left + p.width - 8,
+          p.y + 24,
+          left + p.width - 12,
+          p.y + 38,
+        );
       }
       if (p.id === 0) {
-        g.fillStyle(0x3d615b);
-        g.fillRect(38, p.y - 50, 7, 50);
-        g.fillStyle(0xc39155);
-        g.fillRect(20, p.y - 54, 78, 28);
-        g.fillStyle(0x553f37);
-        g.fillRect(27, p.y - 44, 42, 3);
-        g.fillTriangle(71, p.y - 48, 81, p.y - 43, 71, p.y - 38);
+        g.fillStyle(0x263e57);
+        g.fillRect(26, p.y - 120, 28, 120);
+        g.fillRect(20, p.y - 96, 40, 4);
+        g.fillStyle(0xe2b292);
+        g.fillRect(35, p.y - 115, 5, 5);
+        g.lineStyle(2, 0x728e9f);
+        g.lineBetween(40, p.y - 120, 70, p.y - 146);
+        g.lineBetween(40, p.y - 120, 15, p.y - 143);
+      }
+      if (p.id === this.goal.id) {
+        g.fillStyle(0xf4c99a, 0.12);
+        g.fillCircle(p.x, p.y - 18, 38);
+        g.fillStyle(0xaac6d2);
+        g.fillRect(left + 5, p.y - 50, 3, 50);
+        g.fillStyle(0xd99bad);
+        g.fillRect(left + 8, p.y - 50, 25, 14);
+        this.heart(g, left + 19, p.y - 47, 0xf2ded0, 0.65);
       }
     }
-    g.lineStyle(1, 0xf2e9ca, 0.15);
-    for (let z = 1; z < 5; z++) {
-      const y = WORLD.ground - z * 600 + 35;
-      g.lineBetween(0, y, 800, y);
-    }
+    // Decorative edges are visibly recessed; only the bright platforms are solid.
+    g.fillStyle(0x091225, 0.7);
+    g.fillRect(0, 0, 7, this.level.height);
+    g.fillRect(793, 0, 7, this.level.height);
+  }
+  renderUI() {
+    const p = this.pilot;
+    if (!p) return;
+    $("time").textContent = formatTime(p.elapsed);
+    $("jumps").textContent = p.jumps;
+    $("falls").textContent = p.falls;
+    $("best").textContent = this.best ? formatTime(this.best) : "—";
+    $("altitude").textContent = String(
+      Math.max(0, Math.round((this.level.ground - p.y) / 10)),
+    ).padStart(3, "0");
+    $("charge-fill").style.width = `${p.charging ? p.charge * 100 : 0}%`;
+    $("charge-label").textContent = p.charging
+      ? `${Math.round(p.charge * 100)}%`
+      : "LISTO";
+    $("zone-title").textContent =
+      `${this.level.kind === "training" ? "T" : "0" + (this.zone + 1)} · ${this.level.zones[Math.max(0, this.zone)].tag}`;
+    $("progress-fill").style.height =
+      `${Math.min(100, Math.max(0, ((this.level.ground - p.y) / (this.level.ground - this.goal.y)) * 100))}%`;
+    $("help").textContent =
+      this.level.kind === "training"
+        ? "← → / A D · Mantén ESPACIO y suelta · Sin control en el aire"
+        : this.level.zones[Math.max(0, this.zone)].hint;
   }
   bindControls() {
     const mapping = {
@@ -415,13 +750,12 @@ class Climb extends Phaser.Scene {
       KeyD: "right",
       Space: "jump",
     };
-    this.heldCodes = new Set();
     window.addEventListener("keydown", (e) => {
+      if (e.target instanceof HTMLInputElement) return;
       if (mapping[e.code]) {
-        if (e.target instanceof HTMLButtonElement && this.state !== "playing")
-          return;
+        if (this.state !== "playing") return;
         e.preventDefault();
-        this.heldCodes.add(e.code);
+        this.held.add(e.code);
         input[mapping[e.code]] = true;
       }
       if (e.repeat) return;
@@ -430,262 +764,94 @@ class Climb extends Phaser.Scene {
         if (this.state === "playing") this.pauseRun();
         else if (this.state === "paused") this.resume();
       }
-      if (
-        e.code === "KeyR" &&
-        (this.state === "playing" || this.state === "paused")
-      ) {
+      if (e.code === "KeyR" && ["playing", "paused"].includes(this.state)) {
         e.preventDefault();
         this.pauseRun();
-        modal("reset");
+        this.confirmReset();
       }
-      if (e.code === "KeyM") toggleSound();
+      if (e.code === "KeyM") $("sound").click();
     });
     window.addEventListener("keyup", (e) => {
       if (mapping[e.code]) {
-        e.preventDefault();
-        this.heldCodes.delete(e.code);
-        input[mapping[e.code]] = [...this.heldCodes].some(
-          (code) => mapping[code] === mapping[e.code],
+        this.held.delete(e.code);
+        input[mapping[e.code]] = [...this.held].some(
+          (k) => mapping[k] === mapping[e.code],
         );
       }
     });
-    document.querySelectorAll("[data-touch]").forEach((button) => {
-      button.addEventListener("pointerdown", (e) => {
+    document.querySelectorAll("[data-touch]").forEach((b) => {
+      b.addEventListener("pointerdown", (e) => {
         e.preventDefault();
         if (this.state !== "playing") return;
-        button.setPointerCapture(e.pointerId);
-        input[button.dataset.touch] = true;
-        button.classList.add("held");
+        b.setPointerCapture(e.pointerId);
+        input[b.dataset.touch] = true;
+        b.classList.add("held");
       });
       const release = (e) => {
         e.preventDefault();
-        input[button.dataset.touch] = false;
-        button.classList.remove("held");
+        input[b.dataset.touch] = false;
+        b.classList.remove("held");
       };
-      button.addEventListener("pointerup", release);
-      button.addEventListener("pointercancel", release);
-      button.addEventListener("lostpointercapture", release);
+      ["pointerup", "pointercancel", "lostpointercapture"].forEach((k) =>
+        b.addEventListener(k, release),
+      );
     });
     window.addEventListener("blur", () => this.pauseRun());
     document.addEventListener("visibilitychange", () => {
       if (document.hidden) this.pauseRun();
     });
-    ui.pause.onclick = () =>
+    window.addEventListener("pagehide", () => this.saveRun());
+    $("pause").onclick = () =>
       this.state === "playing" ? this.pauseRun() : this.resume();
-    ui.sound.onclick = toggleSound;
+    $("sound").onclick = () => {
+      soundOn = !soundOn;
+      $("sound").textContent = soundOn ? "Sonido ON" : "Sonido OFF";
+      $("sound").setAttribute("aria-pressed", String(soundOn));
+      $("sound").setAttribute(
+        "aria-label",
+        soundOn ? "Silenciar sonido" : "Activar sonido",
+      );
+      if (soundOn) tone(440);
+    };
     $("fullscreen").onclick = async () => {
       try {
         if (document.fullscreenElement) await document.exitFullscreen();
         else await document.querySelector(".play-area").requestFullscreen();
       } catch {
-        toast("La pantalla completa no está disponible en este navegador.");
+        toast("Este navegador no permite pantalla completa.");
       }
     };
-  }
-  startRun() {
-    clearInput();
-    clearTimeout(toast.timer);
-    ui.toast.classList.remove("show");
-    ui.toast.textContent = "";
-    this.lastBounce = -Infinity;
-    this.chargeRing.clear();
-    this.heldCodes.clear();
-    this.state = "playing";
-    this.elapsed = 0;
-    this.jumps = 0;
-    this.falls = 0;
-    this.highestZone = 0;
-    this.highest = 0;
-    this.airVX = 0;
-    this.dropOrigin = WORLD.ground;
-    this.fallCounted = false;
-    this.lastPlatform = 0;
-    this.newRecord = false;
-    this.wasGrounded = false;
-    this.player.body.reset(120, WORLD.ground);
-    this.player.setVelocity(0, 0).setTexture("knight").setFlipX(false);
-    this.physics.resume();
-    ui.overlay.hidden = true;
-    ui.pause.disabled = false;
-    ui.pause.textContent = "Pausa";
-    ui.primary.blur();
-    this.resetCamera();
-    this.paintSky(0);
-    this.renderUI();
-    tone(420, 0.1);
-  }
-  pauseRun() {
-    if (this.state !== "playing") return;
-    this.state = "paused";
-    this.physics.pause();
-    this.heldCodes.clear();
-    modal("paused");
-    ui.pause.textContent = "Seguir";
-    this.renderUI();
-  }
-  resume() {
-    if (this.state !== "paused") return;
-    clearInput();
-    this.heldCodes.clear();
-    this.state = "playing";
-    ui.overlay.hidden = true;
-    ui.primary.blur();
-    this.physics.resume();
-    ui.pause.textContent = "Pausa";
-  }
-  win() {
-    if (this.state !== "playing") return;
-    this.state = "won";
-    this.player.setVelocity(0, 0);
-    this.physics.pause();
-    this.newRecord = !best || this.elapsed < best;
-    if (this.newRecord) {
-      best = this.elapsed;
-      try {
-        writeBest(localStorage, best);
-      } catch {}
-      ui.best.textContent = formatTime(best);
-    }
-    ui.pause.disabled = true;
-    this.renderUI();
-    tone(880, 0.4, "triangle");
-    modal("won");
-  }
-  update(_time, delta) {
-    if (this.state !== "playing") return;
-    const dt = Math.min(delta, 50),
-      body = this.player.body,
-      grounded = body.blocked.down || body.touching.down;
-    this.elapsed += dt;
-    if (grounded) {
-      if (!this.wasGrounded) {
-        tone(this.fallCounted ? 140 : 220, 0.05, "triangle");
-        this.airVX = 0;
-        this.dropOrigin = body.bottom;
-        this.fallCounted = false;
-      }
-      const dir = Number(input.right) - Number(input.left);
-      if (dir) this.player.setFlipX(dir < 0);
-      if (input.jump && !this.wasJump) {
-        this.charging = true;
-        this.charge = 0;
-      }
-      if (this.charging) {
-        this.charge = Math.min(1, this.charge + dt / WORLD.chargeMs);
-        body.setVelocityX(0);
-        this.player.setTexture("crouch");
-        if (!input.jump) {
-          this.airVX = dir * WORLD.jumpX;
-          body.setVelocity(this.airVX, -jumpSpeed(this.charge));
-          this.dropOrigin = body.bottom;
-          this.jumps++;
-          this.charging = false;
-          this.player.setTexture("knight");
-          tone(300 + this.charge * 250, 0.12, "square", 0.018);
-        }
-      } else body.setVelocityX(dir * WORLD.walk);
-    } else {
-      this.charging = false;
-      this.charge = 0;
-      this.player.setTexture("knight");
-      if (
-        (body.blocked.left || body.blocked.right) &&
-        this.time.now - this.lastBounce > 100
-      ) {
-        this.airVX = -(this.airVX || (body.blocked.left ? -180 : 180)) * 0.7;
-        this.lastBounce = this.time.now;
-        tone(120, 0.04);
-      }
-      body.setVelocityX(this.airVX);
-      this.dropOrigin = Math.min(this.dropOrigin, body.bottom);
-      if (!this.fallCounted && body.bottom - this.dropOrigin > 190) {
-        this.falls++;
-        this.fallCounted = true;
-      }
-    }
-    this.wasJump = input.jump;
-    this.wasGrounded = grounded;
-    if (body.top > WORLD.height + 80) {
-      this.player.body.reset(120, WORLD.ground);
-      this.player.setVelocity(0, 0);
-      this.airVX = 0;
-      this.falls++;
-    }
-    const z = zoneAt(body.bottom);
-    if (z !== this.zone) {
-      this.paintSky(z);
-      if (z > this.highestZone) {
-        this.highestZone = z;
-        toast(`${String(z + 1).padStart(2, "0")} · ${ZONES[z].name}`);
-        tone(660, 0.16, "triangle");
-      }
-    }
-    this.highest = Math.max(this.highest || 0, heightAt(body.center.y));
-    this.chargeRing.clear();
-    if (this.charging) {
-      this.chargeRing.lineStyle(2, 0xf2d18b, 0.8);
-      this.chargeRing.strokeCircle(
-        this.player.x,
-        this.player.y - 17,
-        25 + this.charge * 8,
+    // Keep modal keyboard focus inside the active dialog.
+    $("overlay").addEventListener("keydown", (e) => {
+      if (e.code !== "Tab") return;
+      const nodes = [...$("overlay").querySelectorAll("button,input")].filter(
+        (n) => !n.disabled && n.getClientRects().length,
       );
-    }
-    if (
-      grounded &&
-      this.lastPlatform === GOAL.id &&
-      Math.abs(this.player.x - GOAL.x) < GOAL.width / 2
-    )
-      this.win();
-    this.renderUI();
+      const first = nodes[0],
+        last = nodes.at(-1);
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    });
   }
-  renderUI() {
-    const body = this.player.body,
-      z = Math.max(0, this.zone);
-    ui.time.textContent = formatTime(this.elapsed);
-    ui.jumps.textContent = this.jumps;
-    ui.falls.textContent = this.falls;
-    ui.altitude.textContent = String(heightAt(body.center.y)).padStart(3, "0");
-    ui["charge-fill"].style.width = `${this.charging ? this.charge * 100 : 0}%`;
-    ui["charge-label"].textContent = this.charging
-      ? `${Math.round(this.charge * 100)}%`
-      : "LISTO";
-    ui["zone-title"].textContent = `0${z + 1} · ${ZONES[z].tag}`;
-  }
-}
-function toggleSound() {
-  soundOn = !soundOn;
-  ui.sound.textContent = soundOn ? "Sonido ON" : "Sonido OFF";
-  ui.sound.setAttribute("aria-pressed", String(soundOn));
-  ui.sound.setAttribute(
-    "aria-label",
-    soundOn ? "Silenciar sonido" : "Activar sonido",
-  );
-  if (soundOn) tone(440);
 }
 new Phaser.Game({
   type: Phaser.AUTO,
   parent: "game",
   width: 800,
   height: viewportHeight(),
-  backgroundColor: "#aecad2",
+  backgroundColor: "#192c48",
   pixelArt: true,
   roundPixels: true,
   antialias: false,
-  physics: {
-    default: "arcade",
-    arcade: {
-      gravity: { y: WORLD.gravity },
-      debug: false,
-      fps: 60,
-      fixedStep: true,
-    },
-  },
   scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
   audio: { noAudio: true },
-  scene: [Climb],
+  scene: [Moonbound],
   callbacks: {
-    postBoot: (game) => {
-      game.canvas.setAttribute("aria-hidden", "true");
-    },
+    postBoot: (game) => game.canvas.setAttribute("aria-hidden", "true"),
   },
 });
