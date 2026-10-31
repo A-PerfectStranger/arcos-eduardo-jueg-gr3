@@ -10,7 +10,9 @@ export const WORLD = Object.freeze({
   minJump: 250,
   maxJump: 690,
   playerW: 22,
-  playerH: 34,
+  playerH: 42,
+  feetHalf: 6,
+  minFootOverlap: 2,
   step: 1 / 120,
   rebound: 0.7,
   terminal: 1100,
@@ -170,8 +172,8 @@ export const zoneAt = (y) =>
   Math.max(0, Math.min(4, Math.floor((WORLD.ground - y) / 600)));
 export function zoneFor(level, y) {
   let zone = 0;
-  for (const p of level.platforms)
-    if (p.y >= y - 1) zone = Math.max(zone, p.zone);
+  for (const boundary of level.zoneStarts ?? level.platforms)
+    if (boundary.y >= y - 1) zone = Math.max(zone, boundary.zone);
   return zone;
 }
 export function trainingLevel() {
@@ -183,6 +185,8 @@ export function trainingLevel() {
     spawn: 120,
     zones: TRAINING_ZONES,
     platforms: PLATFORMS,
+    walls: [],
+    revision: 3,
     goal: GOAL,
   };
 }
@@ -208,7 +212,50 @@ export function newSeed() {
   return values[0].toString(36).toUpperCase().padStart(7, "0");
 }
 const EPS = 1e-7;
-// Continuous swept AABB: find the first surface crossed, including thin ledges.
+const indexes = new WeakMap();
+const CELL = 128;
+export function footOverlap(x, platform) {
+  return (
+    Math.min(x + WORLD.feetHalf, platform.x + platform.width / 2) -
+    Math.max(x - WORLD.feetHalf, platform.x - platform.width / 2)
+  );
+}
+// Geometry is immutable after generation. Cache a vertical broad phase per map.
+function geometryIndex(level) {
+  if (indexes.has(level)) return indexes.get(level);
+  const solids = [
+    ...level.platforms,
+    ...(level.walls ?? []),
+    { id: -1, x: -20, y: -1000, width: 40, height: level.height + 3000 },
+    { id: -2, x: 820, y: -1000, width: 40, height: level.height + 3000 },
+  ];
+  const bins = new Map();
+  for (const solid of solids) {
+    for (
+      let row = Math.floor(solid.y / CELL);
+      row <= Math.floor((solid.y + (solid.height ?? 24)) / CELL);
+      row++
+    ) {
+      if (!bins.has(row)) bins.set(row, []);
+      bins.get(row).push(solid);
+    }
+  }
+  const index = {
+    solids,
+    query(top, bottom) {
+      const first = Math.floor(top / CELL),
+        last = Math.floor(bottom / CELL);
+      if (first === last) return bins.get(first) ?? [];
+      const found = new Set();
+      for (let row = first; row <= last; row++)
+        for (const p of bins.get(row) ?? []) found.add(p);
+      return found;
+    },
+  };
+  indexes.set(level, index);
+  return index;
+}
+// Swept AABB in feet coordinates. Top contacts require actual boot support.
 function sweep(x, y, dx, dy, r) {
   const minX = r.x - r.width / 2 - WORLD.playerW / 2,
     maxX = r.x + r.width / 2 + WORLD.playerW / 2;
@@ -223,15 +270,15 @@ function sweep(x, y, dx, dy, r) {
   const tx = Math.min(tx1, tx2),
     ty = Math.min(ty1, ty2),
     entry = Math.max(tx, ty),
-    end = Math.min(Math.max(tx1, tx2), Math.max(ty1, ty2));
-  if (entry < -EPS || entry > 1 + EPS || entry > end + EPS || end < 0)
+    exit = Math.min(Math.max(tx1, tx2), Math.max(ty1, ty2));
+  if (entry < -EPS || entry > 1 + EPS || entry > exit + EPS || exit < 0)
     return null;
-  return {
-    t: Math.max(0, entry),
-    nx: tx > ty ? -Math.sign(dx) : 0,
-    ny: tx > ty ? 0 : -Math.sign(dy),
-    id: r.id,
-  };
+  const nx = tx > ty ? -Math.sign(dx) : 0,
+    ny = tx > ty ? 0 : -Math.sign(dy),
+    t = Math.max(0, entry);
+  if (ny === -1 && footOverlap(x + dx * t, r) < WORLD.minFootOverlap - EPS)
+    return null;
+  return { t, nx, ny, id: r.id };
 }
 export class Astronaut {
   constructor(level, x = level.spawn, y = level.ground) {
@@ -241,8 +288,8 @@ export class Astronaut {
       y,
       vx: 0,
       vy: 0,
-      grounded: true,
-      platformId: 0,
+      grounded: false,
+      platformId: null,
       charging: false,
       charge: 0,
       wasJump: false,
@@ -255,17 +302,24 @@ export class Astronaut {
       state: "idle",
       elapsed: 0,
     });
-    this.solids = [
-      ...level.platforms,
-      { id: -1, x: -20, y: -1000, width: 40, height: level.height + 3000 },
-      {
-        id: -2,
-        x: WORLD.width + 20,
-        y: -1000,
-        width: 40,
-        height: level.height + 3000,
-      },
-    ];
+    this.geometry = geometryIndex(level);
+    this.solids = this.geometry.solids;
+    const support = this.supportAt();
+    if (support) {
+      this.grounded = true;
+      this.platformId = support.id;
+      this.y = support.y;
+    }
+  }
+  supportAt() {
+    for (const p of this.geometry.query(this.y - 0.001, this.y + 0.001))
+      if (
+        p.id >= 0 &&
+        Math.abs(this.y - p.y) < 0.001 &&
+        footOverlap(this.x, p) >= WORLD.minFootOverlap - EPS
+      )
+        return p;
+    return null;
   }
   cancelCharge() {
     this.charging = false;
@@ -276,9 +330,22 @@ export class Astronaut {
     this.elapsed += dt * 1000;
     this.landed = false;
     this.bounced = false;
+    // Recheck support before input; stale grounded flags cannot swallow a jump.
+    if (this.grounded) {
+      const support = this.supportAt();
+      this.grounded = !!support;
+      if (support) {
+        this.y = support.y;
+        this.platformId = support.id;
+      } else {
+        this.cancelCharge();
+        this.peak = this.y;
+      }
+    }
     const dir = Number(!!input.right) - Number(!!input.left);
     if (this.grounded) {
-      if (input.jump && !this.wasJump) {
+      // A held press can begin charging on landing. Air time never adds charge.
+      if ((input.jump || input.jumpPressed) && !this.charging) {
         this.charging = true;
         this.charge = 0;
       }
@@ -305,7 +372,10 @@ export class Astronaut {
       const dx = this.vx * remaining,
         dy = this.vy * remaining;
       let first = null;
-      for (const solid of this.solids) {
+      for (const solid of this.geometry.query(
+        Math.min(this.y, this.y + dy) - WORLD.playerH,
+        Math.max(this.y, this.y + dy),
+      )) {
         const hit = sweep(this.x, this.y, dx, dy, solid);
         if (
           hit &&
@@ -338,19 +408,11 @@ export class Astronaut {
         }
       }
     }
-    if (this.grounded) {
-      this.grounded = this.level.platforms.some(
-        (p) =>
-          Math.abs(this.y - p.y) < 0.001 &&
-          this.x + WORLD.playerW / 2 > p.x - p.width / 2 + EPS &&
-          this.x - WORLD.playerW / 2 < p.x + p.width / 2 - EPS,
-      );
-      if (!this.grounded) {
-        this.charging = false;
-        this.charge = 0;
-        this.peak = this.y;
-        this.fallCounted = false;
-      }
+    if (this.grounded && !this.supportAt()) {
+      this.grounded = false;
+      this.cancelCharge();
+      this.peak = this.y;
+      this.fallCounted = false;
     }
     this.peak = Math.min(this.peak, this.y);
     if (!this.grounded && !this.fallCounted && this.y - this.peak > 190) {
@@ -368,87 +430,221 @@ export class Astronaut {
           : "fall";
   }
 }
-// The generator constructs a landing witness, then tests the whole solid route.
-// Charge ticks are private design metadata, never shown during the campaign.
+export const ROOMS_PER_ZONE = 6;
+export const CAMPAIGN_ASCENTS = ROOMS_PER_ZONE * 4 * 5;
+const flights = new Map();
+function flight(rise, ticks) {
+  const key = rise + ":" + ticks;
+  if (flights.has(key)) return flights.get(key);
+  let y = 0,
+    v = -jumpSpeed((ticks * WORLD.step * 1000) / WORLD.chargeMs),
+    x = 0,
+    result = null;
+  for (let n = 0; n < 180; n++) {
+    v += WORLD.gravity * WORLD.step;
+    const next = y + v * WORLD.step;
+    if (v > 0 && next >= -rise) {
+      if (y <= -rise)
+        result = x + WORLD.jumpX * WORLD.step * ((-rise - y) / (next - y));
+      break;
+    }
+    y = next;
+    x += WORLD.jumpX * WORLD.step;
+  }
+  flights.set(key, result);
+  return result;
+}
+function planJump(level, source, target, route) {
+  const dir = Math.sign(target.x - source.x),
+    rise = source.y - target.y,
+    candidates = [];
+  const step = Math.min(60, source.width * 0.38);
+  for (const offset of [0, -step / 2, step / 2, -step, step]) {
+    const launchX = source.x + offset;
+    for (let ticks = 52; ticks <= 96; ticks++) {
+      const travel = flight(rise, ticks);
+      if (travel === null) continue;
+      const error = Math.abs(launchX + dir * travel - target.x);
+      if (error <= target.width / 2 - WORLD.feetHalf - 2)
+        candidates.push({
+          launchX,
+          ticks,
+          score: error + Math.abs(offset) * 0.2,
+        });
+    }
+  }
+  candidates.sort((a, b) => a.score - b.score || a.ticks - b.ticks);
+  for (const c of candidates) {
+    const succeeds = (offset) => {
+      const pilot = new Astronaut(level, c.launchX + offset, source.y);
+      for (let n = 0; n < c.ticks; n++) pilot.step({ jump: true });
+      pilot.step({ left: dir < 0, right: dir > 0 });
+      for (
+        let n = 0;
+        n < 240 && !pilot.grounded && pilot.y < source.y + 60;
+        n++
+      )
+        pilot.step({});
+      return pilot.grounded && pilot.platformId === target.id;
+    };
+    // One walk tick is 1.25 px: never rely on an exact subpixel takeoff.
+    if (succeeds(0) && succeeds(-1.5) && succeeds(1.5))
+      return {
+        from: source.id,
+        to: target.id,
+        x: c.launchX,
+        y: source.y,
+        dir,
+        ticks: c.ticks,
+        route,
+      };
+  }
+  throw new Error(
+    `Invalid route: ${level.seed}/${source.id}->${target.id} ${JSON.stringify({ source, target, candidates: candidates.length })}`,
+  );
+}
+// Two connected routes through every chamber, with reconvergence at its exit.
+// The entire map, including walls, exists before either route is validated.
 export function generateCampaign(seed) {
   seed = String(seed).trim().slice(0, 40) || newSeed();
-  const random = seededRandom(seed),
-    ground = 5800,
-    platforms = [{ id: 0, x: 400, y: ground, width: 800, height: 24, zone: 0 }];
-  let x = 120,
-    y = ground,
-    direction = 1;
-  for (let zone = 0; zone < 5; zone++) {
-    const rules = CAMPAIGN_ZONES[zone];
-    for (let j = 0; j < 8; j++) {
-      const short = rules.shortRise && j % 3 === 1;
-      const riseRange = short ? rules.shortRise : rules.rise,
-        chargeRange = short ? rules.shortCharge : rules.charge;
-      const rise = Math.round(
-        riseRange[0] + random() * (riseRange[1] - riseRange[0]),
-      );
-      const ticks = Math.ceil(
-        ((chargeRange[0] + random() * (chargeRange[1] - chargeRange[0])) *
-          WORLD.chargeMs) /
-          (WORLD.step * 1000),
-      );
-      const launchSpeed = jumpSpeed(
-        Math.min(1, (ticks * WORLD.step * 1000) / WORLD.chargeMs),
-      );
-      let yy = y,
-        v = -launchSpeed,
-        travel = 0;
-      for (let t = 0; t < 180; t++) {
-        v += WORLD.gravity * WORLD.step;
-        const next = yy + v * WORLD.step;
-        if (v > 0 && next >= y - rise) {
-          travel += WORLD.jumpX * WORLD.step * ((y - rise - yy) / (next - yy));
-          break;
-        }
-        yy = next;
-        travel += WORLD.jumpX * WORLD.step;
+  const random = seededRandom(seed);
+  const chambers = [];
+  let total = 0;
+  for (let zone = 0; zone < 5; zone++)
+    for (let room = 0; room < ROOMS_PER_ZONE; room++) {
+      const rules = CAMPAIGN_ZONES[zone],
+        rises = [];
+      for (let step = 0; step < 4; step++) {
+        const range =
+          rules.shortRise && step === 1 ? rules.shortRise : rules.rise;
+        const rise = Math.round(range[0] + random() * (range[1] - range[0]));
+        rises.push(rise);
+        total += rise;
       }
-      if (x + direction * travel > 710 || x + direction * travel < 90)
-        direction *= -1;
-      const nextX = Math.round(x + direction * travel);
-      const width = rules.width - Math.floor(random() * 7);
-      platforms.push({
-        id: platforms.length,
-        x: nextX,
-        y: y - rise,
-        width,
-        height: 24,
-        zone,
-        challenge: short ? "measured" : "ascent",
-        witness: { x, y, dir: direction, ticks },
-      });
-      x = nextX;
-      y -= rise;
+      chambers.push({ zone, room, rises });
     }
+  const ground = total + 480,
+    platforms = [
+      {
+        id: 0,
+        x: 400,
+        y: ground,
+        width: 800,
+        height: 24,
+        zone: 0,
+        kind: "ground",
+      },
+    ],
+    walls = [],
+    rooms = [],
+    zoneStarts = [];
+  let base = ground,
+    source = platforms[0];
+  for (const chamber of chambers) {
+    const { zone, room, rises } = chamber,
+      rules = CAMPAIGN_ZONES[zone];
+    if (room === 0) zoneStarts.push({ zone, y: base });
+    const routes = { left: [], right: [] },
+      ys = [];
+    let yy = base;
+    for (const rise of rises) {
+      yy -= rise;
+      ys.push(yy);
+    }
+    const target = {
+      id: 0,
+      x: 400,
+      y: ys[3],
+      width: rules.width + 12,
+      height: 24,
+      zone,
+      kind: "hub",
+      room: rooms.length,
+    };
+    for (const route of ["left", "right"]) {
+      const xs =
+        route === "left"
+          ? [
+              260 + Math.floor(random() * 17),
+              90 + Math.floor(random() * 15),
+              260 + Math.floor(random() * 17),
+            ]
+          : [
+              524 + Math.floor(random() * 17),
+              696 + Math.floor(random() * 15),
+              524 + Math.floor(random() * 17),
+            ];
+      for (let step = 0; step < 3; step++) {
+        const p = {
+          id: platforms.length,
+          x: xs[step],
+          y: ys[step] + (zone ? Math.floor(random() * 7) - 3 : 0),
+          width: rules.width - Math.floor(random() * 7),
+          height: 24,
+          zone,
+          kind: "ledge",
+          route,
+          room: rooms.length,
+        };
+        platforms.push(p);
+        routes[route].push(p.id);
+      }
+    }
+    target.id = platforms.length;
+    platforms.push(target);
+    const current = {
+      id: rooms.length,
+      zone,
+      entry: source.id,
+      exit: target.id,
+      routes,
+    };
+    rooms.push(current);
+    if (room % 2 === 1) {
+      const top = target.y + 96,
+        bottom = base - 230;
+      walls.push({
+        id: 10000 + walls.length,
+        x: 400,
+        y: top,
+        width: 24 + zone * 4,
+        height: bottom - top,
+        zone,
+        kind: "wall",
+        room: current.id,
+      });
+    }
+    source = target;
+    base = target.y;
   }
   const level = {
     kind: "campaign",
+    revision: 3,
     seed,
-    height: ground + 60,
+    height: ground + 64,
     ground,
-    spawn: 120,
+    spawn: 400,
     zones: CAMPAIGN_ZONES,
     platforms,
+    walls,
+    rooms,
+    zoneStarts,
     goal: platforms.at(-1),
+    routePlans: { left: [], right: [] },
   };
-  // Catch regressions when designers change gravity, geometry or charge rules.
-  for (let i = 1; i < platforms.length; i++) {
-    const p = platforms[i],
-      a = new Astronaut(level, p.witness.x, p.witness.y);
-    for (let n = 0; n < p.witness.ticks; n++) a.step({ jump: true });
-    a.step({ left: p.witness.dir < 0, right: p.witness.dir > 0, jump: false });
-    for (let n = 0; n < 240 && !a.grounded; n++) a.step({});
-    if (!a.grounded || a.platformId !== p.id)
-      throw new Error(`Invalid route: ${seed}/${p.id}`);
-  }
+  for (const room of rooms)
+    for (const route of ["left", "right"]) {
+      let from = platforms[room.entry];
+      for (const id of [...room.routes[route], room.exit]) {
+        const target = platforms[id],
+          edge = planJump(level, from, target, route);
+        level.routePlans[route].push(edge);
+        from = target;
+      }
+    }
   return level;
 }
-export function readBest(storage, key = "cima.training.best.v2") {
+export function readBest(storage, key = "cima.training.best.v3") {
   try {
     const n = Number(storage.getItem(key));
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -456,7 +652,7 @@ export function readBest(storage, key = "cima.training.best.v2") {
     return null;
   }
 }
-export function writeBest(storage, ms, key = "cima.training.best.v2") {
+export function writeBest(storage, ms, key = "cima.training.best.v3") {
   try {
     storage.setItem(key, String(ms));
   } catch {
@@ -464,7 +660,7 @@ export function writeBest(storage, ms, key = "cima.training.best.v2") {
   }
 }
 export function campaignBestKey(seed) {
-  return `cima.moon.best.v2.${seed}`;
+  return `cima.moon.best.v3.${seed}`;
 }
 export function readUnlock(storage) {
   try {

@@ -1,9 +1,9 @@
 {
   "name": "hasta-la-luna",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "Astronauta de salto cargado: entrenamiento y campaña procedural con rutas verificadas",
+  "description": "Ascenso retro de precisión: cadete de entrenamiento y astronauta en un mundo procedural de rutas múltiples",
   "scripts": {
     "start": "python3 -m http.server 8080",
     "test": "node --test tests/*.test.js",
