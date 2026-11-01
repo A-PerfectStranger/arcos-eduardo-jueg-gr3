@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = Path(os.environ.get('CIMA_TEST_OUTPUT', 'work/production-results'))
 OUT.mkdir(parents=True, exist_ok=True)
 files = ['index.html', 'style.css', 'src/loader.js', 'src/game.js',
-         'src/model.js', 'src/sprites.js', 'assets/vendor/phaser.min.js',
+         'src/model.js', 'src/environment.js', 'src/sprites.js', 'assets/vendor/phaser.min.js',
          'assets/moon.svg', 'assets/retro-cover.png', 'assets/retro-sprites.png']
 results = []
 for name in files:

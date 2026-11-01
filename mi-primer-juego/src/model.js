@@ -64,22 +64,64 @@ export const TRAINING_ZONES = [
     top: 0xf1c589,
   },
 ];
-const centers = [
-  300, 490, 660, 470, 270, 100, 290, 480, 670, 490, 300, 110, 290, 480, 660,
-  470, 280, 110, 300, 490, 670, 480, 290, 120, 310,
+// Hand-composed training: broad shelves, narrow boughs and alternating rests.
+const trainingSteps = [
+  [300, 112, 192, "shelf"],
+  [490, 136, 152, "branch"],
+  [665, 92, 192, "cliff"],
+  [470, 148, 174, "shelf"],
+  [270, 112, 218, "terrace"],
+  [105, 128, 160, "branch"],
+  [295, 96, 174, "bough"],
+  [480, 152, 146, "branch"],
+  [675, 104, 190, "cliff"],
+  [490, 120, 210, "terrace"],
+  [300, 144, 160, "ruin"],
+  [110, 88, 172, "arch"],
+  [295, 156, 140, "ruin"],
+  [480, 108, 166, "shelf"],
+  [665, 104, 196, "terrace"],
+  [470, 132, 152, "shard"],
+  [280, 112, 140, "branch"],
+  [110, 148, 154, "cliff"],
+  [300, 96, 128, "shard"],
+  [490, 112, 190, "terrace"],
+  [675, 140, 130, "ruin"],
+  [480, 100, 146, "shard"],
+  [290, 152, 124, "shelf"],
+  [120, 108, 154, "cliff"],
+  [310, 104, 200, "terrace"],
 ];
+let trainingY = WORLD.ground;
 export const PLATFORMS = [
-  { id: 0, x: 400, y: WORLD.ground, width: 800, height: 24, zone: 0 },
-  ...centers.map((x, i) => ({
+  {
+    id: 0,
+    x: 400,
+    y: WORLD.ground,
+    width: 800,
+    height: 60,
+    zone: 0,
+    kind: "ground",
+    shape: "cliff",
+  },
+  ...trainingSteps.map(([x, rise, width, shape], i) => ({
     id: i + 1,
     x,
-    y: WORLD.ground - (i + 1) * 120,
-    width: 158 - Math.floor(i / 5) * 12,
-    height: 24,
+    y: (trainingY -= rise),
+    width,
+    height:
+      shape === "branch" || shape === "bough"
+        ? 12
+        : shape === "terrace"
+          ? 26
+          : 20,
     zone: Math.min(4, Math.floor(i / 5)),
+    kind: "ledge",
+    shape,
   })),
 ];
 export const GOAL = PLATFORMS.at(-1);
+let training;
 export const ZONES = TRAINING_ZONES;
 export const CAMPAIGN_ZONES = [
   {
@@ -177,7 +219,8 @@ export function zoneFor(level, y) {
   return zone;
 }
 export function trainingLevel() {
-  return {
+  if (training) return training;
+  const level = {
     kind: "training",
     seed: "ENTRENAMIENTO",
     height: WORLD.height,
@@ -185,10 +228,47 @@ export function trainingLevel() {
     spawn: 120,
     zones: TRAINING_ZONES,
     platforms: PLATFORMS,
-    walls: [],
-    revision: 3,
+    walls: terrainMasses(PLATFORMS),
+    revision: 4,
     goal: GOAL,
+    routePlans: { left: [], right: [] },
   };
+  for (let i = 1; i < PLATFORMS.length; i++)
+    level.routePlans.left.push(
+      planJump(
+        level,
+        i === 1 ? { ...PLATFORMS[0], x: level.spawn } : PLATFORMS[i - 1],
+        PLATFORMS[i],
+        "left",
+      ),
+    );
+  level.routePlans.right = level.routePlans.left;
+  training = level;
+  return level;
+}
+// Solid stepped undersides share the exact geometry used by the renderer.
+// Tops stay flat and readable; roots, broken masonry and crags taper below.
+function terrainMasses(platforms) {
+  const solids = [];
+  for (const p of platforms) {
+    if (!p.id || ["branch", "bough", "panel"].includes(p.shape)) continue;
+    const depth = p.shape === "cliff" ? 28 : p.shape === "terrace" ? 24 : 16;
+    for (let tier = 0; tier < 2; tier++) {
+      const width = Math.floor((p.width * (tier ? 0.28 : 0.55)) / 2) * 2;
+      solids.push({
+        id: 10000 + solids.length,
+        x: p.x + (p.id % 2 ? 4 : -4),
+        y: p.y + p.height + (tier * depth) / 2,
+        width,
+        height: depth / 2,
+        zone: p.zone,
+        kind: "mass",
+        parent: p.id,
+        shape: p.shape,
+      });
+    }
+  }
+  return solids;
 }
 export function seededRandom(seed) {
   let h = 2166136261;
@@ -503,8 +583,8 @@ function planJump(level, source, target, route) {
     `Invalid route: ${level.seed}/${source.id}->${target.id} ${JSON.stringify({ source, target, candidates: candidates.length })}`,
   );
 }
-// Two connected routes through every chamber, with reconvergence at its exit.
-// The entire map, including walls, exists before either route is validated.
+// Six asymmetric chamber patterns. Both complete routes are validated against
+// all stepped solid terrain before a seed is offered to the player.
 export function generateCampaign(seed) {
   seed = String(seed).trim().slice(0, 40) || newSeed();
   const random = seededRandom(seed);
@@ -530,12 +610,12 @@ export function generateCampaign(seed) {
         x: 400,
         y: ground,
         width: 800,
-        height: 24,
+        height: 60,
+        shape: "cliff",
         zone: 0,
         kind: "ground",
       },
     ],
-    walls = [],
     rooms = [],
     zoneStarts = [];
   let base = ground,
@@ -544,6 +624,18 @@ export function generateCampaign(seed) {
     const { zone, room, rises } = chamber,
       rules = CAMPAIGN_ZONES[zone];
     if (room === 0) zoneStarts.push({ zone, y: base });
+    // Asymmetric chambers vary launch distances, materials and resting ledges.
+    const layouts = [
+      [150, 310, 160],
+      [175, 320, 155],
+      [155, 300, 170],
+      [165, 310, 165],
+      [180, 325, 175],
+      [160, 300, 155],
+    ];
+    const layout =
+      (room + zone * 2 + Math.floor(random() * 3)) % layouts.length;
+    const hubX = [390, 410, 395, 405, 400, 410][(room + zone) % 6];
     const routes = { left: [], right: [] },
       ys = [];
     let yy = base;
@@ -553,34 +645,48 @@ export function generateCampaign(seed) {
     }
     const target = {
       id: 0,
-      x: 400,
+      x: hubX,
       y: ys[3],
-      width: rules.width + 12,
-      height: 24,
+      width: rules.width + 24,
+      height: 26,
+      shape: zone === 2 ? "ruin" : zone === 4 ? "shard" : "terrace",
       zone,
       kind: "hub",
       room: rooms.length,
     };
     for (const route of ["left", "right"]) {
-      const xs =
-        route === "left"
-          ? [
-              260 + Math.floor(random() * 17),
-              90 + Math.floor(random() * 15),
-              260 + Math.floor(random() * 17),
-            ]
-          : [
-              524 + Math.floor(random() * 17),
-              696 + Math.floor(random() * 15),
-              524 + Math.floor(random() * 17),
-            ];
+      const side = route === "left" ? -1 : 1;
+      const offsets = layouts[(layout + (side > 0 ? 2 : 0)) % layouts.length];
+      const xs = [
+        source.x + side * offsets[0],
+        400 + side * Math.max(zone >= 2 ? 315 : 0, offsets[1]),
+        hubX + side * offsets[2],
+      ];
       for (let step = 0; step < 3; step++) {
         const p = {
           id: platforms.length,
-          x: xs[step],
-          y: ys[step] + (zone ? Math.floor(random() * 7) - 3 : 0),
-          width: rules.width - Math.floor(random() * 7),
-          height: 24,
+          x: Math.max(
+            rules.width / 2 + 8,
+            Math.min(792 - rules.width / 2, xs[step]),
+          ),
+          y:
+            ys[step] +
+            (zone >= 2
+              ? Math.floor(random() * 7) - 3
+              : Math.floor(random() * 15) - 7),
+          width:
+            rules.width - Math.floor(random() * 13) + (step === 1 ? 10 : 0),
+          height: step === 1 && zone < 2 ? 12 : 20 + (layout % 3) * 4,
+          shape:
+            zone === 0
+              ? ["shelf", "branch", "cliff"][step]
+              : zone === 1
+                ? ["bough", "branch", "shelf"][step]
+                : zone === 2
+                  ? ["ruin", "panel", "arch"][step]
+                  : zone === 3
+                    ? ["shard", "shelf", "cliff"][step]
+                    : ["cliff", "shard", "ruin"][step],
           zone,
           kind: "ledge",
           route,
@@ -598,35 +704,22 @@ export function generateCampaign(seed) {
       entry: source.id,
       exit: target.id,
       routes,
+      layout,
     };
     rooms.push(current);
-    if (room % 2 === 1) {
-      const top = target.y + 96,
-        bottom = base - 230;
-      walls.push({
-        id: 10000 + walls.length,
-        x: 400,
-        y: top,
-        width: 24 + zone * 4,
-        height: bottom - top,
-        zone,
-        kind: "wall",
-        room: current.id,
-      });
-    }
     source = target;
     base = target.y;
   }
   const level = {
     kind: "campaign",
-    revision: 3,
+    revision: 4,
     seed,
     height: ground + 64,
     ground,
     spawn: 400,
     zones: CAMPAIGN_ZONES,
     platforms,
-    walls,
+    walls: terrainMasses(platforms),
     rooms,
     zoneStarts,
     goal: platforms.at(-1),
@@ -644,7 +737,7 @@ export function generateCampaign(seed) {
     }
   return level;
 }
-export function readBest(storage, key = "cima.training.best.v3") {
+export function readBest(storage, key = "cima.training.best.v4") {
   try {
     const n = Number(storage.getItem(key));
     return Number.isFinite(n) && n > 0 ? n : null;
@@ -652,7 +745,7 @@ export function readBest(storage, key = "cima.training.best.v3") {
     return null;
   }
 }
-export function writeBest(storage, ms, key = "cima.training.best.v3") {
+export function writeBest(storage, ms, key = "cima.training.best.v4") {
   try {
     storage.setItem(key, String(ms));
   } catch {
@@ -660,7 +753,7 @@ export function writeBest(storage, ms, key = "cima.training.best.v3") {
   }
 }
 export function campaignBestKey(seed) {
-  return `cima.moon.best.v3.${seed}`;
+  return `cima.moon.best.v4.${seed}`;
 }
 export function readUnlock(storage) {
   try {

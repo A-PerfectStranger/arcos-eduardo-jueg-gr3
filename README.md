@@ -39,11 +39,15 @@ No tienes un cohete que te lleve hasta ella. Tienes tus botas, una dirección y 
 
 | Etapa | Objetivo | Lo que te espera |
 | --- | --- | --- |
-| **00 · Entrenamiento** | Completa el mapa original de 25 plataformas | Practica con el cadete, sin traje espacial; aprende carga, rebotes y caídas |
+| **00 · Entrenamiento** | Completa 25 saltos entre salientes, ramas y ruinas | Practica con el cadete, sin traje espacial; aprende carga, rebotes y caídas |
 | **01 · Expedición** | Recorre cinco zonas y 30 tramos con dos rutas | Elige ruta ámbar o turquesa; ambas llevan a la Luna |
 | **02 · Reencuentro** | Aterriza junto a ella en la Luna | El final de esta promesa; otra semilla para tu próxima aventura |
 
-Cada zona de campaña contiene **seis tramos de cuatro ascensos**: 24 saltos por zona, tres veces la extensión de la versión anterior. Hay **210 plataformas elevadas**, suelo y **15 paredes sólidas** repartidas por el viaje. Cada tramo permite subir por la ruta ámbar o por la turquesa y reunirse al final; puedes cambiar de ruta en esos encuentros.
+Cada zona de campaña contiene **seis tramos de cuatro ascensos**: 24 saltos por zona. Hay **210 plataformas elevadas** y suelo. Seis patrones asimétricos varían distancias y posiciones de despegue: ramas estrechas, salientes de roca, descansos anchos, mampostería, paneles y fragmentos lunares. Las bases escalonadas son sólidas y comparten geometría con el dibujo. Cada tramo permite elegir ruta ámbar o turquesa y cambiar de lado en el descanso común.
+
+![Bosque de musgo: salientes sólidos, capas de árboles y una cuidadora junto a la fogata.](mi-primer-juego/assets/readme/bosque.png)
+
+El primer tramo recorre un bosque de musgo; después aparecen copas rojizas, ruinas orbitales, asteroides y la Luna. Los fondos usan siluetas de árboles en dos planos, corteza, lianas, niebla y píxeles de follaje. Las hojas y aves se mueven; zorros y pájaros habitan las plataformas bajas. Más arriba hay pequeños robots y brotes de terrario. Los descansos tienen viajeros, fogatas o exploradores con radio: acércate para leer sus consejos, sin abrir un menú. Son habitantes pacíficos y los descansos no guardan checkpoints. La pausa detiene las animaciones; la preferencia de movimiento reducido las deja estáticas.
 
 Completar el entrenamiento desbloquea **Partir hacia la Luna**. Entonces el cadete se equipa con el traje de astronauta. El navegador recuerda ese desbloqueo. Después puedes repetirlo o elegir **Nueva expedición** desde el menú.
 
@@ -103,11 +107,11 @@ Cinco zonas separan la Tierra de su ventana. **Pulsa cada transmisión** para le
 
 | Señal | Destino | Anchura de apoyo lateral | Exigencia de precisión |
 | --- | --- | --- | --- |
-| 01 | Cosmódromo | 152–158 px | ★☆☆☆☆ |
-| 02 | Estratosfera | 124–130 px | ★★☆☆☆ |
-| 03 | Estación orbital | 96–102 px | ★★★☆☆ |
-| 04 | Campo de asteroides | 68–74 px | ★★★★☆ |
-| 05 | Luna | 40–46 px | ★★★★★ |
+| 01 | Cosmódromo | 146–168 px | ★☆☆☆☆ |
+| 02 | Estratosfera | 118–140 px | ★★☆☆☆ |
+| 03 | Estación orbital | 90–112 px | ★★★☆☆ |
+| 04 | Campo de asteroides | 62–84 px | ★★★★☆ |
+| 05 | Luna | 34–56 px | ★★★★★ |
 
 <details>
 <summary><strong>01 · COSMÓDROMO — La última noche en casa</strong></summary>
@@ -132,7 +136,7 @@ Las nubes se apartan; los bordes se acercan. Las plataformas se estrechan y las 
 
 > «He dejado la radio encendida para ti.» — L
 
-Entre paneles orbitales, los muros dividen algunos tramos. Son sólidos: bloquean la subida por el centro y permiten rebotar contra sus laterales o aterrizar sobre su borde. Alterna impulso y medida; más potencia puede llevarte más allá del destino.
+Entre paneles orbitales aparecen restos de mampostería con bases quebradas. Sus caras son sólidas: busca espacio para despegar y alterna impulso y medida. Los pequeños robots de mantenimiento acompañan este tramo; más potencia puede llevarte más allá del destino.
 
 </details>
 
@@ -148,7 +152,7 @@ Los apoyos son más pequeños. Revisa la posición de tus botas y la distancia a
 <details>
 <summary><strong>05 · LUNA — A un salto de ti</strong></summary>
 
-La señal ya casi no tiene ruido. Los apoyos laterales tienen entre **40 y 46 píxeles** de ancho; las plataformas de encuentro miden 58 px. Combina lo aprendido: posición, dirección y carga. El último tramo pide precisión.
+La señal ya casi no tiene ruido. Los apoyos laterales tienen entre **34 y 56 píxeles** de ancho; las plataformas de encuentro miden 70 px. Combina lo aprendido: posición, dirección y carga. El último tramo pide precisión.
 
 El mensaje final te espera dentro del juego.
 
@@ -201,7 +205,7 @@ La documentación del Workshop distingue [hitboxes](https://teamnexile.github.io
 | Física | Simulación propia a 120 Hz, gravedad de 1300 px/s² y caída limitada a 1100 px/s; Phaser dibuja | La misma entrada produce la misma trayectoria con 30, 60 o 144 FPS de renderizado |
 | Colisiones | Barrido AABB continuo y apoyo real de los pies; se requieren 2 px de contacto con una suela de 12 px | Evitar el apoyo invisible fuera del borde; techos y paredes son sólidos, con rebote lateral al 70 % |
 | Cámara | Franja de seguimiento, suavizado exponencial independiente del FPS, límites por mapa y margen para HUD/táctil | Ver destino y caída; evitar que la cámara oscile con cada pequeño salto |
-| Niveles | 30 tramos, dos rutas por tramo, 15 paredes y validación de cada salto con pequeñas variaciones de posición | Ofrecer decisiones y garantizar que el despegue no dependa de una coordenada perfecta |
+| Niveles | 30 tramos, seis patrones asimétricos, apoyos con bases escalonadas y dos rutas comprobadas con margen de posición | Ofrecer decisiones y garantizar que el despegue no dependa de una coordenada perfecta |
 | Progresión | Plataformas cada vez más pequeñas y mezcla de cargas parciales y altas | Aumentar precisión sin cambiar la física aprendida |
 | Presentación | Sprites de 16 × 24 px, escala 2 sin filtrado, paleta corta y poses con un único anclaje en los pies | Cadete en entrenamiento, astronauta en campaña y aspecto de consola antigua |
 
@@ -211,15 +215,15 @@ No se copia el mapa, las texturas ni el código de Jump King. La cámara de esta
 
 | Zona | Anchura de plataforma | Subida habitual | Subida de carga parcial |
 | --- | --- | --- | --- |
-| Cosmódromo | 152–158 px | 112–120 px | — |
-| Estratosfera | 124–130 px | 120–130 px | — |
-| Estación orbital | 96–102 px | 126–140 px | 104–116 px |
-| Asteroides | 68–74 px | 134–148 px | 98–110 px |
-| Luna | 40–46 px | 140–154 px | 92–104 px |
+| Cosmódromo | 146–168 px | 112–120 px | — |
+| Estratosfera | 118–140 px | 120–130 px | — |
+| Estación orbital | 90–112 px | 126–140 px | 104–116 px |
+| Asteroides | 62–84 px | 134–148 px | 98–110 px |
+| Luna | 34–56 px | 140–154 px | 92–104 px |
 
-La tabla describe los apoyos de las rutas. Las plataformas de encuentro tienen 12 px más de anchura. La separación vertical se varía unos pocos píxeles por ruta; los rangos de la tabla son las alturas base de cada tramo. Todas las plataformas de una zona siguen siendo más estrechas que las de la anterior.
+La tabla describe los apoyos de las rutas. Las plataformas de encuentro tienen 24 px más de anchura que el valor base de su zona. La altura de los cuerpos varía entre 12 y 28 px y sus bases sólidas añaden escalones inferiores. Los rangos verticales de la tabla son las alturas base: cada ruta varía hasta ±7 px en las primeras zonas y ±3 px después. La anchura media disminuye con la altura; las zonas mezclan apoyos estrechos con descansos más amplios.
 
-El generador construye **seis tramos por zona**, cada uno con una entrada, tres apoyos ámbar, tres turquesa y una salida común. Los recorridos convergen sin actuar como checkpoints: las caídas siguen siendo continuas. En tramos alternos aparece un muro central; el espacio inferior permite salir hacia cualquiera de las rutas.
+El generador construye **seis tramos por zona**, cada uno con una entrada, tres apoyos ámbar, tres turquesa y una salida común. Los recorridos convergen sin actuar como checkpoints: las caídas siguen siendo continuas. Las posiciones, las anchuras, los materiales y los techos cambian según el patrón y la semilla. El centro queda abierto; las decisiones proceden de los salientes y de la trayectoria de cada salto.
 
 Una vez colocados **todos los sólidos**, el planificador busca cargas y posiciones de despegue con la clase `Astronaut`, la misma que usa el jugador. Cada conexión se prueba desde la posición elegida y desde **±1,5 px**, más de un paso de caminata de la simulación. Así evita recorridos que solo funcionarían desde un punto subpíxel exacto. Hay dos planes completos de 120 saltos y se pueden mezclar en los encuentros. El mapa no se regenera durante una caída.
 
@@ -237,13 +241,14 @@ La garantía es que existen rutas comprobadas, no que cualquier salto permita re
 
 - `mi-primer-juego/src/model.js`: física pura, almacenamiento, mapa de entrenamiento y generador.
 - `mi-primer-juego/src/game.js`: presentación, cámara, estados, entrada, audio y guardado de la partida.
+- `mi-primer-juego/src/environment.js`: escenarios originales en cuadrícula de dos píxeles, terreno sobre los sólidos del mapa, capas de profundidad, fauna, NPCs y diálogos por proximidad. No usa imágenes de los juegos de referencia.
 - `mi-primer-juego/src/sprites.js`: dibujos originales sobre una cuadrícula de 16 × 24 px, con pies alineados en la fila 23. Cadete, astronauta y amada tienen ocho poses cada uno; el reencuentro combina dos sprites. La hitbox del cuerpo sigue siendo de 22 × 42 px.
 - [`retro-sprites.png`](mi-primer-juego/assets/retro-sprites.png): atlas exportado de **128 × 72 px**, con cadete, astronauta y amada en filas. El código dibuja estos mismos píxeles, sin recortes automáticos ni filtrado.
 - `mi-primer-juego/assets/retro-cover.png`: nueva ilustración de portada de inspiración retro, generada para esta temática. Los personajes del juego se dibujan sobre su cuadrícula nativa, no se recortan de la portada.
 
 - `mi-primer-juego/assets/moon.svg`: icono lunar. `mi-primer-juego/assets/crown.svg` se conserva como archivo legado sin uso.
 
-Los fondos y plataformas se dibujan por código con paletas, paneles orbitales, asteroides y superficie lunar. Phaser conserva su [licencia MIT](mi-primer-juego/assets/vendor/PHASER-LICENSE.md). El PDF anterior es material histórico y no describe esta versión.
+Los fondos y plataformas se dibujan por código con una paleta corta por zona: bosque verde, dosel rojizo, ruinas orbitales, asteroides y superficie lunar. Phaser conserva su [licencia MIT](mi-primer-juego/assets/vendor/PHASER-LICENSE.md). El PDF anterior es material histórico y no describe esta versión.
 
 
 Las capturas de esta bitácora están en `mi-primer-juego/assets/readme/` y proceden de recorridos reales de las pruebas de navegador.
@@ -261,7 +266,7 @@ python -m playwright install --with-deps chromium
 CHROMIUM_PATH=/ruta/a/chromium python3 mi-primer-juego/tests/browser.py
 ```
 
-El modelo prueba **1.000 semillas y 240.000 conexiones de salto**, cada una con margen de posición, además de recorridos continuos por la izquierda, la derecha y combinando ambas rutas. Cubre el entrenamiento, bordes sin apoyo, carga al aterrizar, paredes, techos y colisiones de alta velocidad. Chromium realiza **29 comprobaciones**, incluidos los 120 saltos de cada ruta completa, caminar y volver a saltar, pulsaciones breves y teclado combinado con táctil. Los recorridos completos usan entradas y simulación real, sin recolocar al astronauta.
+El modelo prueba **1.000 semillas y 240.000 conexiones de salto**, cada una con margen de posición, además de recorridos continuos por la izquierda, la derecha y combinando ambas rutas. Cubre el entrenamiento, bordes sin apoyo, carga al aterrizar, paredes, techos y colisiones de alta velocidad. Chromium realiza **34 comprobaciones**, incluidos los 120 saltos de cada ruta completa, caminar y volver a saltar, pulsaciones breves, teclado combinado con táctil, diálogo por proximidad, animación, profundidad del fondo y movimiento reducido. Los recorridos completos usan entradas y simulación real, sin recolocar al astronauta.
 
 `?qa=1` expone la escena para pruebas. `CIMA_TEST_OUTPUT` elige la carpeta de evidencias; `CIMA_URL` permite probar otra URL terminada en `/`.
 
@@ -272,7 +277,7 @@ El modelo prueba **1.000 semillas y 240.000 conexiones de salto**, cada una con 
 - **Verify published CIMA** espera a que los archivos públicos coincidan por SHA-256 con el código del commit y después juega la versión publicada.
 - Las capturas y resultados quedan en los artefactos de [GitHub Actions](https://github.com/A-PerfectStranger/arcos-eduardo-jueg-gr3/actions). Los indicadores de la cabecera enlazan a cada verificación.
 
-Las pruebas realizadas cubren Chromium de escritorio y emulación táctil. Faltan Safari, Firefox, teléfonos físicos y sesiones con personas para afinar el ritmo. Las plataformas y paredes son estáticas; la variedad procede de las rutas, las posiciones, las alturas y las decisiones en cada encuentro. Futuros obstáculos móviles requieren una validación específica antes de incorporarse.
+Las pruebas realizadas cubren Chromium de escritorio y emulación táctil. Faltan Safari, Firefox, teléfonos físicos y sesiones con personas para afinar el ritmo. Los sólidos del terreno son estáticos; la variedad procede de las rutas, las posiciones, las alturas y las decisiones en cada encuentro. Futuros obstáculos móviles requieren una validación específica antes de incorporarse.
 
 </details>
 
