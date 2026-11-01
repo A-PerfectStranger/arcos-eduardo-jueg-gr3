@@ -22,6 +22,7 @@ jobs:
         run: |
           npm --prefix mi-primer-juego test
           node --check mi-primer-juego/src/game.js
+          node --check mi-primer-juego/src/environment.js
           node --check mi-primer-juego/src/sprites.js
           node --check mi-primer-juego/src/loader.js
           git diff --check
