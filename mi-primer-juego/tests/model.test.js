@@ -25,7 +25,7 @@ function jump(a, ticks, dir = 1) {
 function finish(a, max = 400) {
   for (let i = 0; i < max && !a.grounded; i++) a.step(empty);
 }
-test("original 25-platform map is preserved as separate training", () => {
+test("25 varied training ascents are reachable with real walking and charged jumps", () => {
   const t = trainingLevel();
   assert.equal(t.platforms, PLATFORMS);
   assert.equal(t.platforms.length, 26);
@@ -33,12 +33,12 @@ test("original 25-platform map is preserved as separate training", () => {
   assert.equal(t.ground, 3240);
   const a = new Astronaut(t);
   for (let i = 1; i < t.platforms.length; i++) {
-    const p = t.platforms[i],
-      dir = Math.sign(p.x - a.x),
-      launch = p.x - dir * 208;
-    for (let n = 0; Math.abs(launch - a.x) > 1.3 && n < 250; n++)
-      a.step({ left: launch < a.x, right: launch > a.x });
-    jump(a, 96, dir);
+    const p = t.platforms[i], edge=t.routePlans.left[i-1];
+    let n=0;
+    while(Math.abs(edge.x-a.x)>.65&&n++<250)
+      a.step({ left: edge.x<a.x, right: edge.x>a.x });
+    assert.ok(n<250);
+    jump(a, edge.ticks, edge.dir);
     finish(a);
     assert.equal(a.platformId, p.id, `training jump ${i}`);
   }
@@ -83,7 +83,7 @@ test("solid underside cancels upward velocity and walls reflect airborne motion"
     a.step({});
     top = Math.min(top, a.y - WORLD.playerH);
   }
-  assert.ok(top >= 3144 - 1e-5);
+  assert.ok(top >= PLATFORMS[1].y + PLATFORMS[1].height - 1e-5);
   const b = new Astronaut(trainingLevel(), 780, 3020);
   b.grounded = false;
   b.vx = 250;
@@ -110,23 +110,25 @@ test("walking off an edge falls continuously without a respawn", () => {
   assert.ok(a.grounded);
   assert.equal(a.y, 500);
 });
-test("1000 larger seeds validate both routes and walls, 240000 jumps", () => {
+test("1000 seeds validate both routes through varied solid terrain, 240000 jumps", () => {
   for (let i = 0; i < 1000; i++) {
     const level = generateCampaign(String(i));
     assert.equal(level.platforms.length, 211);
     assert.equal(level.rooms.length, 30);
-    assert.equal(level.walls.length, 15);
+    assert.ok(level.walls.length>0);
+    assert.ok(level.walls.every(b=>b.kind==='mass'&&b.parent>0));
+    assert.ok(new Set(level.rooms.map(r=>r.layout)).size>=4);
+    assert.ok(new Set(level.platforms.map(p=>p.shape)).size>=7);
+    assert.ok(new Set(level.platforms.map(p=>p.height)).size>=4);
     assert.equal(level.routePlans.left.length, CAMPAIGN_ASCENTS);
     assert.equal(level.routePlans.right.length, CAMPAIGN_ASCENTS);
     assert.ok(level.ground - level.goal.y > 14000);
-    for (let zone = 1; zone < 5; zone++) {
-      const before = level.platforms.filter((p) => p.id && p.zone === zone - 1),
-        after = level.platforms.filter((p) => p.zone === zone);
-      assert.ok(
-        Math.max(...after.map((p) => p.width)) <
-          Math.min(...before.map((p) => p.width)),
-      );
-    }
+    // Later zones narrow the landing areas without forcing identical ledges.
+    const widths=Array.from({length:5},(_,zone)=>{
+      const ps=level.platforms.filter(p=>p.id&&p.zone===zone);
+      return ps.reduce((sum,p)=>sum+p.width,0)/ps.length;
+    });
+    assert.ok(widths.every((w,i)=>i===0||w<widths[i-1]));
     for (const p of level.platforms)
       assert.ok(p.x - p.width / 2 >= 0 && p.x + p.width / 2 <= 800);
     for (const room of level.rooms) {

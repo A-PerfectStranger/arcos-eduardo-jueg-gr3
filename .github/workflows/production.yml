@@ -7,7 +7,7 @@ permissions:
   contents: read
 jobs:
   published-gameplay:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -26,9 +26,11 @@ jobs:
         env:
           CIMA_URL: https://a-perfectstranger.github.io/arcos-eduardo-jueg-gr3/mi-primer-juego/
           CIMA_TEST_OUTPUT: work/production-results
+          CIMA_SITE_URL: https://a-perfectstranger.github.io/arcos-eduardo-jueg-gr3/
         run: |
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           python3 mi-primer-juego/tests/browser.py
+          python3 tests/landing.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:

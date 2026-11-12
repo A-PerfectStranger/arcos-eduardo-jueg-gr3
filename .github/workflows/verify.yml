@@ -7,8 +7,9 @@ on:
 permissions:
   contents: read
 jobs:
-  gameplay:
-    runs-on: ubuntu-latest
+  model:
+    name: Model and syntax
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -22,22 +23,41 @@ jobs:
         run: |
           npm --prefix mi-primer-juego test
           node --check mi-primer-juego/src/game.js
+          node --check mi-primer-juego/src/environment.js
           node --check mi-primer-juego/src/sprites.js
           node --check mi-primer-juego/src/loader.js
+          python3 -m py_compile scripts/package-game.py tests/landing.py
           git diff --check
+  browser:
+    name: Game, landing and portable package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Package portable HTML5 game
+        run: python3 scripts/package-game.py
       - name: Install browser test tools
         run: |
           pip install -r mi-primer-juego/tests/requirements.txt
           python -m playwright install --with-deps chromium
-      - name: Browser gameplay tests
+      - name: Browser gameplay and landing tests
         env:
           CIMA_TEST_OUTPUT: work/test-results
         run: |
           python3 -m http.server 8080 > /tmp/cima-server.log 2>&1 &
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           python3 mi-primer-juego/tests/browser.py
+          CHECK_PACKAGE=1 python3 tests/landing.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: cima-browser-evidence
           path: work/test-results
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hasta-la-luna-html5
+          path: work/hasta-la-luna-html5.zip
+          if-no-files-found: error

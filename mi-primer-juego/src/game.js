@@ -13,6 +13,7 @@ import {
   writeUnlock,
 } from "./model.js";
 import { makeSprites, showSprite } from "./sprites.js";
+import { LivingWorld, paintTerrain } from "./environment.js";
 const $ = (id) => document.getElementById(id);
 const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const input = { left: false, right: false, jump: false, jumpPressed: false };
@@ -110,7 +111,6 @@ class Moonbound extends Phaser.Scene {
     this.highestZone = 0;
     makeSprites(this);
     this.sky = this.add.graphics().setScrollFactor(0).setDepth(-30);
-    this.decor = this.add.graphics().setScrollFactor(0.18).setDepth(-20);
     this.terrain = this.add.graphics().setDepth(-2);
     this.fx = this.add.graphics().setDepth(1);
     this.player = this.add
@@ -122,6 +122,7 @@ class Moonbound extends Phaser.Scene {
       .setOrigin(0.5, 1)
       .setFlipX(true)
       .setDepth(3);
+    this.livingWorld = new LivingWorld(this, reduced);
     this.loadLevel(trainingLevel());
     this.bindControls();
     this.resizeView();
@@ -155,12 +156,13 @@ class Moonbound extends Phaser.Scene {
     this.landUntil = 0;
     this.bestKey =
       level.kind === "training"
-        ? "cima.training.best.v3"
+        ? "cima.training.best.v4"
         : campaignBestKey(level.seed);
     this.best = null;
     try {
       this.best = readBest(localStorage, this.bestKey);
     } catch {}
+    this.livingWorld.rebuild();
     this.paintTerrain();
     this.paintSky(0);
     this.beloved
@@ -219,7 +221,7 @@ class Moonbound extends Phaser.Scene {
     this.highestZone = 0;
     this.newRecord = false;
     this.saved = null;
-    store.remove("cima.run.v3");
+    store.remove("cima.run.v4");
     $("overlay").hidden = true;
     $("pause").disabled = false;
     $("pause").textContent = "Pausa";
@@ -296,7 +298,7 @@ class Moonbound extends Phaser.Scene {
       } catch {}
     }
     this.renderUI();
-    store.remove("cima.run.v3");
+    store.remove("cima.run.v4");
     tone(880, 0.4, "triangle");
     const stats = `${formatTime(this.pilot.elapsed)} · ${this.pilot.jumps} saltos · ${this.pilot.falls} caídas`;
     if (this.level.kind === "training") {
@@ -334,9 +336,9 @@ class Moonbound extends Phaser.Scene {
     if (!["playing", "paused"].includes(this.state)) return;
     const p = this.pilot;
     store.set(
-      "cima.run.v3",
+      "cima.run.v4",
       JSON.stringify({
-        version: 3,
+        version: 4,
         kind: this.level.kind,
         seed: this.level.seed,
         x: p.x,
@@ -356,10 +358,10 @@ class Moonbound extends Phaser.Scene {
   }
   readSaved() {
     try {
-      const s = JSON.parse(store.get("cima.run.v3"));
+      const s = JSON.parse(store.get("cima.run.v4"));
       if (
         !s ||
-        s.version !== 3 ||
+        s.version !== 4 ||
         !["training", "campaign"].includes(s.kind) ||
         typeof s.seed !== "string" ||
         (s.kind === "campaign" && !unlocked)
@@ -466,7 +468,7 @@ class Moonbound extends Phaser.Scene {
     return [
       "",
       "La carga decide la altura. No puedes corregir en el aire.",
-      "Los techos detienen el salto; las paredes te hacen rebotar.",
+      "Los salientes tienen fondo sólido. Busca espacio para despegar.",
       "Al caer, puedes volver a plataformas anteriores.",
       "Últimos saltos. En la cima comienza tu viaje.",
     ][z];
@@ -482,6 +484,7 @@ class Moonbound extends Phaser.Scene {
     }
     this.drawPlayer();
     this.followCamera(Math.min(delta, 100) / 1000);
+    this.livingWorld.update(delta);
     this.renderUI();
   }
   drawPlayer() {
@@ -576,81 +579,7 @@ class Moonbound extends Phaser.Scene {
   }
   paintSky(zone) {
     this.zone = zone;
-    const z = this.level.zones[zone],
-      g = this.sky,
-      h = this.scale.gameSize.height;
-    g.clear();
-    g.fillStyle(z.sky);
-    g.fillRect(0, 0, 800, h);
-    const disk = (x, y, r, color) => {
-      g.fillStyle(color);
-      for (let yy = -r; yy < r; yy += 4) {
-        const half =
-          Math.floor(Math.sqrt(Math.max(0, r * r - yy * yy)) / 4) * 4;
-        g.fillRect(x - half, y + yy, half * 2, 4);
-      }
-    };
-    for (let i = 0; i < 82; i++) {
-      const x = Math.floor(((i * 173 + 41) % 800) / 4) * 4,
-        y = Math.floor(((i * 127 + 19) % Math.ceil(h)) / 4) * 4;
-      g.fillStyle(i % 7 === 0 ? 0xe8ac9d : 0x859bb0);
-      g.fillRect(x, y, i % 7 === 0 ? 4 : 2, 2);
-    }
-    const mx = 656,
-      my = Math.floor(Math.min(164, h * 0.23) / 4) * 4;
-    disk(mx, my, 48 + zone * 4, 0xb9bdc3);
-    disk(mx - 8, my - 8, 40 + zone * 4, 0xe5dbc5);
-    disk(mx - 16, my + 4, 8, 0x9b9faa);
-    disk(mx + 16, my - 12, 8, 0xb4b5b7);
-    disk(mx + 8, my + 24, 4, 0xa4a8b2);
-    this.heart(g, mx + 44, my - 44, 0xd9879b, 1);
-    // Stepped silhouettes on a four-pixel grid; background never uses solid trim.
-    g.fillStyle(z.far);
-    for (let x = 0; x < 800; x += 16) {
-      const ridge =
-        Math.floor(
-          (h * 0.84 + Math.sin(x * 0.014) * 30 + Math.cos(x * 0.03) * 16) / 8,
-        ) * 8;
-      g.fillRect(x, ridge, 16, h - ridge);
-    }
-    if (zone < 2) {
-      g.fillStyle(z.near);
-      for (let i = 0; i < 5; i++) {
-        const x = i * 192 - 48,
-          y = Math.floor((h * 0.61 + (i % 3) * 40) / 8) * 8;
-        g.fillRect(x, y, 128, 8);
-        g.fillRect(x + 24, y - 8, 72, 8);
-      }
-    }
-    const d = this.decor;
-    d.clear();
-    d.fillStyle(z.near, 0.6);
-    if (zone === 0 || this.level.kind === "training") {
-      for (let i = 0; i < 6; i++) {
-        const x = i * 164 + 12;
-        d.fillRect(x, 80 + i * 24, 56, 320);
-        d.fillRect(x + 8, 64 + i * 24, 40, 24);
-        d.fillRect(x - 8, 380 + i * 24, 72, 16);
-      }
-    } else if (zone === 2) {
-      for (let i = 0; i < 5; i++) {
-        const x = i * 184 - 24,
-          y = 144 + (i % 3) * 104;
-        d.fillRect(x, y, 8, 240);
-        d.fillRect(x - 48, y + 32, 104, 48);
-        d.fillStyle(z.far, 0.45);
-        for (let j = 0; j < 5; j++) d.fillRect(x - 44 + j * 20, y + 36, 16, 40);
-        d.fillStyle(z.near, 0.6);
-      }
-    } else if (zone === 3) {
-      for (let i = 0; i < 12; i++) {
-        const x = (i * 163) % 800,
-          y = 100 + i * 53;
-        d.fillRect(x, y, 32, 24);
-        d.fillRect(x + 8, y - 8, 16, 40);
-      }
-    }
-    $("stage").classList.add("night");
+    this.livingWorld.sky(zone);
   }
   heart(g, x, y, color, scale = 1) {
     g.fillStyle(color);
@@ -661,84 +590,7 @@ class Moonbound extends Phaser.Scene {
     g.fillRect(x - scale, y + 7 * scale, 2 * scale, scale);
   }
   paintTerrain() {
-    const g = this.terrain;
-    g.clear();
-    for (const p of [...this.level.platforms, ...(this.level.walls ?? [])]) {
-      const c = this.level.zones[p.zone],
-        left = p.x - p.width / 2,
-        height = p.height ?? 24,
-        wall = p.kind === "wall";
-      // Every bright pixel belongs to this exact collision rectangle.
-      g.fillStyle(0x0d182a);
-      g.fillRect(left, p.y, p.width, height);
-      g.fillStyle(c.stone);
-      g.fillRect(left + 2, p.y + 2, p.width - 4, height - 4);
-      g.fillStyle(
-        wall
-          ? 0xa6b4bb
-          : p.route === "left"
-            ? 0xe0ae74
-            : p.route === "right"
-              ? 0x83c7bc
-              : c.top,
-      );
-      g.fillRect(left, p.y, p.width, 4);
-      if (wall) {
-        g.fillStyle(0x82929f);
-        g.fillRect(left, p.y, 3, height);
-        g.fillRect(left + p.width - 3, p.y, 3, height);
-        g.fillStyle(0x263a50);
-        for (let yy = 12; yy < height - 4; yy += 16) {
-          g.fillRect(left + 3, p.y + yy, p.width - 6, 2);
-          g.fillRect(
-            left + (Math.floor(yy / 16) % 2 ? 6 : p.width - 9),
-            p.y + yy - 8,
-            2,
-            8,
-          );
-        }
-        g.fillStyle(0xc5c5b8);
-        for (let yy = 8; yy < height - 6; yy += 32) {
-          g.fillRect(left + 4, p.y + yy, 2, 2);
-          g.fillRect(left + p.width - 6, p.y + yy, 2, 2);
-        }
-      } else {
-        g.fillStyle(0x23334b);
-        g.fillRect(left + 2, p.y + height - 5, p.width - 4, 3);
-        for (let j = 8; j < p.width - 8; j += 16) {
-          g.fillStyle(0x33475d);
-          g.fillRect(left + j, p.y + 8, 8, 6);
-          g.fillStyle(0x9eafad);
-          g.fillRect(left + j, p.y + 8, 2, 2);
-        }
-        if (p.kind === "hub" && p.id !== this.goal.id) {
-          g.fillStyle(0xe0ae74);
-          g.fillRect(p.x - 14, p.y - 10, 8, 2);
-          g.fillRect(p.x - 14, p.y - 12, 2, 6);
-          g.fillStyle(0x83c7bc);
-          g.fillRect(p.x + 6, p.y - 10, 8, 2);
-          g.fillRect(p.x + 12, p.y - 12, 2, 6);
-        }
-      }
-      if (p.id === 0) {
-        g.fillStyle(0x5e7989);
-        g.fillRect(36, p.y - 72, 4, 72);
-        g.fillRect(26, p.y - 72, 24, 4);
-        g.fillRect(30, p.y - 68, 16, 4);
-        g.fillStyle(0xe0ae74);
-        g.fillRect(34, p.y - 84, 8, 8);
-      }
-      if (p.id === this.goal.id) {
-        g.fillStyle(0xaabbb9);
-        g.fillRect(left + 4, p.y - 48, 2, 48);
-        g.fillStyle(0xd9879b);
-        g.fillRect(left + 6, p.y - 48, 20, 12);
-        this.heart(g, left + 16, p.y - 46, 0xffe6ba, 0.5);
-      }
-    }
-    g.fillStyle(0x0b1428);
-    g.fillRect(0, 0, 4, this.level.height);
-    g.fillRect(796, 0, 4, this.level.height);
+    paintTerrain(this);
   }
   renderUI() {
     const p = this.pilot;
