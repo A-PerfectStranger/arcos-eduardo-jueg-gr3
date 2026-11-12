@@ -1,0 +1,110 @@
+name: Publish itch.io
+on:
+  workflow_run:
+    workflows: ["Verify CIMA"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: itch-production
+  cancel-in-progress: false
+jobs:
+  distribute:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository &&
+       github.event.workflow_run.event != 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Require verified current main commit
+        id: verified
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner, repo} = context.repo;
+            const source = process.env.SOURCE_SHA;
+            const head = await github.rest.git.getRef({owner, repo, ref: 'heads/main'});
+            if (head.data.object.sha !== source) {
+              core.notice('A newer main commit exists; this older distribution is skipped.');
+              core.setOutput('publish', 'false');
+              return;
+            }
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner, repo, workflow_id: 'verify.yml', branch: 'main',
+              head_sha: source, status: 'success', per_page: 30
+            });
+            const valid = runs.data.workflow_runs.some(run =>
+              run.head_sha === source && run.conclusion === 'success' &&
+              ['push','workflow_dispatch'].includes(run.event) &&
+              run.head_repository.full_name === context.payload.repository.full_name);
+            if (!valid) {
+              core.setFailed('Verify CIMA must pass for this exact main commit before distribution.');
+              return;
+            }
+            core.setOutput('publish', 'true');
+      - uses: actions/checkout@v4
+        if: steps.verified.outputs.publish == 'true'
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.verified.outputs.publish == 'true'
+        with:
+          python-version: '3.12'
+      - name: Package public HTML5 files
+        if: steps.verified.outputs.publish == 'true'
+        run: python3 scripts/package-game.py
+      - uses: actions/upload-artifact@v4
+        if: steps.verified.outputs.publish == 'true'
+        with:
+          name: hasta-la-luna-html5
+          path: work/hasta-la-luna-html5.zip
+          if-no-files-found: error
+      - name: Check itch.io configuration
+        if: steps.verified.outputs.publish == 'true'
+        id: config
+        env:
+          ITCHIO_USER: ${{ vars.ITCHIO_USER }}
+          ITCHIO_GAME: ${{ vars.ITCHIO_GAME }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        shell: bash
+        run: |
+          if [[ -n "$ITCHIO_USER" && -n "$ITCHIO_GAME" && -n "$BUTLER_API_KEY" ]]; then
+            [[ "$ITCHIO_USER" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "Invalid itch.io username"; exit 1; }
+            [[ "$ITCHIO_GAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "Invalid itch.io game slug"; exit 1; }
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::itch.io publication skipped: configure ITCHIO_USER, ITCHIO_GAME and BUTLER_API_KEY. The tested HTML5 ZIP remains available as an artifact."
+            echo "### itch.io: publication skipped" >> "$GITHUB_STEP_SUMMARY"
+            echo "The account, game page and publishing configuration must be completed. No itch.io deployment is claimed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Install official Butler
+        if: steps.config.outputs.enabled == 'true'
+        shell: bash
+        run: |
+          curl --fail --location --retry 3 "https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default" --output "$RUNNER_TEMP/butler.zip"
+          mkdir -p "$RUNNER_TEMP/butler"
+          unzip -q "$RUNNER_TEMP/butler.zip" -d "$RUNNER_TEMP/butler"
+          chmod +x "$RUNNER_TEMP/butler/butler"
+          "$RUNNER_TEMP/butler/butler" -V
+      - name: Publish verified HTML5 build
+        if: steps.config.outputs.enabled == 'true'
+        env:
+          ITCHIO_USER: ${{ vars.ITCHIO_USER }}
+          ITCHIO_GAME: ${{ vars.ITCHIO_GAME }}
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        shell: bash
+        run: |
+          "$RUNNER_TEMP/butler/butler" push dist/itch "$ITCHIO_USER/$ITCHIO_GAME:html5" --userversion "$SOURCE_SHA"
+          echo "### HTML5 build uploaded to itch.io" >> "$GITHUB_STEP_SUMMARY"
+          echo "Version: $SOURCE_SHA. Confirm browser-play and page visibility in the itch.io dashboard." >> "$GITHUB_STEP_SUMMARY"

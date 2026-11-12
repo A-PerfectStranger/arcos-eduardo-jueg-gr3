@@ -8,6 +8,8 @@
 
 *Ella mira la Tierra cada noche. Tú solo necesitas seguir subiendo.*
 
+### [🌙 ABRIR LA LANDING](https://a-perfectstranger.github.io/arcos-eduardo-jueg-gr3/)
+
 ### [🚀 JUGAR AHORA](https://a-perfectstranger.github.io/arcos-eduardo-jueg-gr3/mi-primer-juego/)
 
 [![Pruebas del juego](https://github.com/A-PerfectStranger/arcos-eduardo-jueg-gr3/actions/workflows/verify.yml/badge.svg?branch=main)](https://github.com/A-PerfectStranger/arcos-eduardo-jueg-gr3/actions/workflows/verify.yml)
@@ -24,6 +26,12 @@
 </div>
 
 ---
+
+## El alma, el escaparate y la fábrica automática
+
+La [landing](https://a-perfectstranger.github.io/arcos-eduardo-jueg-gr3/) es el menú de entrada; el juego sigue en `mi-primer-juego/`. [Taller y propósito educativo](docs/TALLER.md) · [Muro de Honor y licencias](CREDITS.md) · [Hogar indie y configuración de itch.io](docs/ITCHIO.md) · [Mensaje para Teams](docs/ENTREGA_TEAMS.md).
+
+GitHub Pages publica main automáticamente. El [workflow de itch.io](.github/workflows/itchio.yml) prepara un ZIP y solo sube con Butler después de superar las pruebas. **La cuenta de itch.io, la página y sus credenciales están pendientes; no se afirma que exista una publicación allí.**
 
 ## Tu misión
 
@@ -272,7 +280,7 @@ El modelo prueba **1.000 semillas y 240.000 conexiones de salto**, cada una con 
 
 **Cómo llega la misión a la web:**
 
-- `main / (root)` es la fuente de GitHub Pages; el HTML raíz dirige a `mi-primer-juego/`.
+- `main / (root)` es la fuente de GitHub Pages; el HTML raíz presenta la landing y su botón JUGAR lleva a `mi-primer-juego/`.
 - **Verify CIMA** comprueba el modelo y juega la versión del repositorio en Chromium.
 - **Verify published CIMA** espera a que los archivos públicos coincidan por SHA-256 con el código del commit y después juega la versión publicada.
 - Las capturas y resultados quedan en los artefactos de [GitHub Actions](https://github.com/A-PerfectStranger/arcos-eduardo-jueg-gr3/actions). Los indicadores de la cabecera enlazan a cada verificación.

@@ -25,7 +25,10 @@ jobs:
           node --check mi-primer-juego/src/environment.js
           node --check mi-primer-juego/src/sprites.js
           node --check mi-primer-juego/src/loader.js
+          python3 -m py_compile scripts/package-game.py tests/landing.py
           git diff --check
+      - name: Package portable HTML5 game
+        run: python3 scripts/package-game.py
       - name: Install browser test tools
         run: |
           pip install -r mi-primer-juego/tests/requirements.txt
@@ -37,6 +40,7 @@ jobs:
           python3 -m http.server 8080 > /tmp/cima-server.log 2>&1 &
           export CHROMIUM_PATH="$(python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
           python3 mi-primer-juego/tests/browser.py
+          CHECK_PACKAGE=1 python3 tests/landing.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
