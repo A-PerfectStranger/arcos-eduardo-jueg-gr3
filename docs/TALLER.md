@@ -43,6 +43,7 @@ Funciona sin JavaScript y sin fuentes, librerías o analítica externas. CSS ada
 **Estado real:** cuenta y página sin crear. El propietario confirmó que no tiene cuenta. La sesión no dispone de conexión a itch.io ni de un navegador operativo para realizar el registro y la verificación. No se inventa una URL ni se declara esta misión terminada.
 
 ## Misión legendaria · La fábrica
+- Los runners se fijan a Ubuntu 24.04, compatible con Playwright 1.55.0; el modelo y el navegador se validan en paralelo para detectar fallos antes.
 - [Verify CIMA](../.github/workflows/verify.yml) valida modelo, sintaxis, jugabilidad y landing en Chromium.
 - GitHub Pages publica main desde la raíz; [Verify published CIMA](../.github/workflows/production.yml) compara hashes y prueba la landing y el juego publicados.
 - [Publish itch.io](../.github/workflows/itchio.yml) se activa tras una verificación correcta de main, empaqueta el HTML5 y conserva un ZIP como artefacto. Publica con Butler cuando existen la cuenta, la ficha, las variables y el secret.
